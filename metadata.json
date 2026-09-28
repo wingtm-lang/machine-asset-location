@@ -1,0 +1,10 @@
+{
+  "name": "PT.WINNERS Machine Asset Location Tracker",
+  "description": "Bilingual (ID/EN) QR code machine asset location tracking system for PT.WINNERS factories (PW1, PW2, PW3, WH2, SW, QA).",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

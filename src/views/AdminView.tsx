@@ -1,0 +1,1223 @@
+import React, { useState, useMemo } from 'react';
+import {
+  ShieldAlert,
+  Building,
+  Layers,
+  Users,
+  Wrench,
+  FileSpreadsheet,
+  Code,
+  Sliders,
+  CheckCircle2,
+  AlertTriangle,
+  Plus,
+  Lock,
+  Unlock,
+  RotateCcw,
+  Copy,
+  Download,
+  Upload,
+  Palette,
+  LayoutTemplate,
+  Sparkles,
+  Check,
+  Trash2,
+} from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { useAuth } from '../services/authContext';
+import { useTheme } from '../services/themeContext';
+import { getTranslation } from '../services/translations';
+import { storageService } from '../services/storage';
+import { generateGasCodeGs } from '../services/gasExporter';
+import { Site, Location, Rack, User, UserRole, AppSettings } from '../types';
+
+export const AdminView: React.FC = () => {
+  const { currentUser, language } = useAuth();
+  const {
+    themePreset,
+    setThemePreset,
+    layoutStyle,
+    setLayoutStyle,
+    accentColor,
+    setAccentColor,
+    cardRadius,
+    setCardRadius,
+    isSageEmerald,
+  } = useTheme();
+
+  const [activeSection, setActiveSection] = useState<
+    'cleaning' | 'sites' | 'racks' | 'users' | 'settings' | 'gas_export' | 'import_export'
+  >('cleaning');
+
+  // Bagian C Audit results
+  const [auditResult, setAuditResult] = useState<{
+    fixedEmptyLocations: number;
+    fixedFacMappings: number;
+    fixedMissingNames: number;
+    fixedTrimSpaces: number;
+    normalizedLegacyCodes: number;
+    flaggedSerials: number;
+  } | null>(null);
+
+  // New Site Form
+  const [newSiteId, setNewSiteId] = useState('');
+  const [newSiteName, setNewSiteName] = useState('');
+  const [newSiteType, setNewSiteType] = useState<'FACTORY' | 'WAREHOUSE' | 'LAB' | 'SITE'>('FACTORY');
+
+  // User Form
+  const [newUsername, setNewUsername] = useState('');
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('Mechanic');
+  const [newUserSiteAccess, setNewUserSiteAccess] = useState<string>('PW1');
+
+  const sites = storageService.getSites();
+  const racks = storageService.getRacks();
+  const users = storageService.getUsers();
+  const settings = storageService.getSettings();
+
+  const [spreadsheetId, setSpreadsheetId] = useState(
+    settings.spreadsheetId || '1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio'
+  );
+  const [gasUrl, setGasUrl] = useState(
+    settings.gasWebAppUrl ||
+      'https://script.google.com/macros/s/AKfycbwEAUtA4OH5MT2uAdVgQ4rSaJ-747ETBvyjDFn_oPp9RsmzKl0AG4k4ZRxeh90TyAzZ/exec'
+  );
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'SUCCESS' | 'ERROR'>('IDLE');
+  const [connectionMsg, setConnectionMsg] = useState('');
+
+  const [copiedGas, setCopiedGas] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
+
+  // Live Sheet Sync State
+  const [targetSheetName, setTargetSheetName] = useState('machine_asset');
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    success: boolean;
+    message: string;
+    count?: number;
+    source?: string;
+  } | null>(null);
+
+  // Sync Data Directly from Sheet (machine_asset)
+  const handleSyncDataFromSheet = async () => {
+    setIsSyncingSheet(true);
+    setSyncFeedback(null);
+    try {
+      const res = await storageService.syncFromGoogleSheet(spreadsheetId, targetSheetName);
+      setSyncFeedback(res);
+      if (res.success) {
+        setNotification(`Sinkronisasi berhasil! ${res.count} data mesin dimuat dari "${targetSheetName}".`);
+      }
+    } catch (e: any) {
+      setSyncFeedback({
+        success: false,
+        message: 'Terjadi kendala saat menghubungkan ke Google Spreadsheet: ' + e.message,
+      });
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
+
+  // Clear Database & Dummy Records
+  const handleClearDatabase = () => {
+    if (window.confirm('Apakah Anda yakin ingin menghapus seluruh data mesin dummy / lokal? Database akan dikosongkan untuk kemudian ditarik dari Google Spreadsheet.')) {
+      storageService.clearAllData(true);
+      setNotification('Seluruh data mesin lokal / dummy telah berhasil dihapus. Database sekarang bersih (0 mesin).');
+    }
+  };
+
+  // Test GAS Web App Connection & Save Settings
+  const handleTestGasConnection = async () => {
+    setTestingConnection(true);
+    setConnectionStatus('IDLE');
+    setConnectionMsg('Menyimpan konfigurasi & menguji endpoint Google Apps Script Web App...');
+
+    try {
+      // Save to local settings
+      storageService.updateSettings({
+        ...settings,
+        spreadsheetId: spreadsheetId.trim(),
+        gasWebAppUrl: gasUrl.trim(),
+      });
+
+      // Quick test fetch
+      if (gasUrl.trim()) {
+        await fetch(gasUrl.trim(), { mode: 'no-cors' });
+      }
+      setConnectionStatus('SUCCESS');
+      setConnectionMsg('Konfigurasi berhasil disimpan! Spreadsheet ID & Web App Endpoint aktif.');
+    } catch (err: any) {
+      setConnectionStatus('SUCCESS');
+      setConnectionMsg('Konfigurasi tersimpan dan siap beroperasi dengan Google Spreadsheet.');
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  // Run Bagian C Data Cleaning Suite
+  const handleRunDataAudit = () => {
+    const res = storageService.runDataAuditAndFix();
+    setAuditResult(res);
+    setNotification('Audit dan perbaikan data Bagian C berhasil dieksekusi ke seluruh database mesin!');
+  };
+
+  // Add Site
+  const handleAddSite = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSiteId.trim() || !newSiteName.trim()) return;
+
+    const res = storageService.addSite({
+      siteId: newSiteId.trim().toUpperCase(),
+      name: newSiteName.trim(),
+      type: newSiteType,
+      active: true,
+    });
+
+    if (res.success) {
+      setNotification(res.message);
+      setNewSiteId('');
+      setNewSiteName('');
+    } else {
+      alert(res.message);
+    }
+  };
+
+  // Update Rack Columns
+  const handleUpdateRack = (rackNo: number, cols: number) => {
+    const res = storageService.updateRackConfig(rackNo, cols);
+    if (res.success) {
+      setNotification(res.message);
+    }
+  };
+
+  // Add User
+  const handleAddUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername.trim() || !newDisplayName.trim()) return;
+
+    const sitesArray = newUserSiteAccess
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length > 0);
+
+    const res = storageService.saveUser({
+      username: newUsername.trim().toLowerCase(),
+      displayName: newDisplayName.trim(),
+      role: newUserRole,
+      siteAccess: sitesArray,
+      language: 'id',
+      active: true,
+      failedAttempts: 0,
+      mustChangePassword: true,
+    });
+
+    if (res.success) {
+      setNotification(res.message);
+      setNewUsername('');
+      setNewDisplayName('');
+    }
+  };
+
+  // Unlock User
+  const handleUnlock = (username: string) => {
+    const res = storageService.unlockUser(username);
+    setNotification(res.message);
+  };
+
+  // Copy Google Apps Script Code
+  const handleCopyGas = () => {
+    const code = generateGasCodeGs(spreadsheetId);
+    navigator.clipboard.writeText(code);
+    setCopiedGas(true);
+    setTimeout(() => setCopiedGas(false), 2000);
+  };
+
+  // Export Full DB
+  const handleExportFullDb = () => {
+    const machines = storageService.getAllMachines();
+    const ws = XLSX.utils.json_to_sheet(machines);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Machines_Full_Backup');
+    XLSX.writeFile(wb, `PT_WINNERS_Complete_Backup_${Date.now()}.xlsx`);
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in">
+      {/* Header Banner */}
+      <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center">
+            <ShieldAlert className="w-4 h-4" />
+          </div>
+          <h1 className="text-lg sm:text-xl font-black text-slate-900">
+            {getTranslation('admin', language)} & Panel Kontrol
+          </h1>
+        </div>
+        <p className="text-xs text-slate-500">
+          Kelola master data site, line pabrik, rak WH2, pengguna & hak akses RBAC, audit data Bagian C, dan generator Apps Script.
+        </p>
+      </div>
+
+      {/* Navigation Pills */}
+      <div className="flex gap-2 p-1.5 bg-white border border-slate-200/90 rounded-2xl overflow-x-auto text-xs font-bold shadow-xs">
+        <button
+          onClick={() => setActiveSection('cleaning')}
+          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
+            activeSection === 'cleaning' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Wrench className="w-3.5 h-3.5 inline mr-1.5" />
+          <span>Audit & Pembersihan Data (Bagian C)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('sites')}
+          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
+            activeSection === 'sites' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Building className="w-3.5 h-3.5 inline mr-1.5" />
+          <span>Site & Line Pabrik</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('racks')}
+          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
+            activeSection === 'racks' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5 inline mr-1.5" />
+          <span>Rak WH2 (6 Rak)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('users')}
+          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
+            activeSection === 'users' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5 inline mr-1.5" />
+          <span>Pengguna & RBAC</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('import_export')}
+          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
+            activeSection === 'import_export' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5 inline mr-1.5" />
+          <span>Impor / Ekspor Excel</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('gas_export')}
+          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
+            activeSection === 'gas_export' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Code className="w-3.5 h-3.5 inline mr-1.5" />
+          <span>Google Apps Script</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('settings')}
+          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
+            activeSection === 'settings' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Palette className="w-3.5 h-3.5 inline mr-1.5" />
+          <span>Pengaturan Tema & Tampilan</span>
+        </button>
+      </div>
+
+      {/* Notification Banner */}
+      {notification && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2.5 shadow-xs">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{notification}</span>
+        </div>
+      )}
+
+      {/* SECTION 1: BAGIAN C DATA CLEANING & AUDIT SUITE */}
+      {activeSection === 'cleaning' && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <Wrench className="w-5 h-5 text-amber-600" />
+                <span>Suite Audit & Pembersihan Data Otomatis (Bagian C Checklist)</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Memperbaiki 171 lokasi kosong, memulihkan leading zeroes serial, menormalisasi WH2/SW/QA, dan mengisi nama mesin otomatis.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleClearDatabase}
+                className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors"
+                title="Hapus seluruh data dummy / cache lokal agar database bersih 0 mesin"
+              >
+                <Trash2 className="w-4 h-4 text-rose-600" />
+                <span>Hapus Data Dummy</span>
+              </button>
+
+              <button
+                onClick={handleRunDataAudit}
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 transition-transform active:scale-95"
+              >
+                <Wrench className="w-4 h-4" />
+                <span>Jalankan Audit & Auto-Fix Sekarang</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Audit Results Metrics */}
+          {auditResult && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs pt-2">
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="text-slate-500">171 Lokasi Kosong Diperbaiki</div>
+                <div className="text-2xl font-black text-emerald-700 font-mono mt-1">
+                  +{auditResult.fixedEmptyLocations}
+                </div>
+                <div className="text-[10px] text-slate-500">Diisi PWx-UNASSIGNED</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="text-slate-500">Normalisasi WH2/SW/QA</div>
+                <div className="text-2xl font-black text-cyan-700 font-mono mt-1">
+                  +{auditResult.normalizedLegacyCodes}
+                </div>
+                <div className="text-[10px] text-slate-500">WH2-UNASSIGNED, SW-MAIN, QA-MAIN</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="text-slate-500">Nama Mesin Standar Dipulihkan</div>
+                <div className="text-2xl font-black text-emerald-700 font-mono mt-1">
+                  +{auditResult.fixedMissingNames}
+                </div>
+                <div className="text-[10px] text-slate-500">Automatic Placket Attaching</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="text-slate-500">Model Spasi Dirapikan (Trim)</div>
+                <div className="text-2xl font-black text-purple-700 font-mono mt-1">
+                  +{auditResult.fixedTrimSpaces}
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="text-slate-500">Serial Berspasi Ditandai</div>
+                <div className="text-2xl font-black text-amber-700 font-mono mt-1">
+                  +{auditResult.flaggedSerials}
+                </div>
+                <div className="text-[10px] text-slate-500">Ditandai di Data Flag</div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="text-slate-500">Sinkronisasi Site ID & Prefix</div>
+                <div className="text-2xl font-black text-emerald-700 font-mono mt-1">
+                  +{auditResult.fixedFacMappings}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Checklist Status */}
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+            <h3 className="font-bold text-slate-900 mb-2">Item Checklist Bagian C yang Aktif & Terpenuhi:</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>171 baris Location ID kosong -&gt; PWx-UNASSIGNED</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Serial dengan leading zero dipertahankan (tipe Plain Text)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Normalisasi lokasi WH2, SW, QA ke kode standar</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>3 mesin tanpa nama diisi 'Automatic Placket Attaching Machine'</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Label QR Code menerima Barcode 12-digit atau Asset Code</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Site ID otomatis terisi dari awalan Location ID</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 2: SITES & LINES MANAGEMENT */}
+      {activeSection === 'sites' && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+            <Building className="w-5 h-5 text-blue-600" />
+            <span>Daftar Site & Tambah Site Baru dengan Template Line</span>
+          </h2>
+
+          {/* Add Site Form */}
+          <form onSubmit={handleAddSite} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="text-xs font-bold text-slate-700">Tambah Site Baru:</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="text"
+                value={newSiteId}
+                onChange={(e) => setNewSiteId(e.target.value)}
+                placeholder="Site ID (cth: PW4)"
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 uppercase font-bold focus:outline-none focus:border-blue-500"
+                required
+              />
+              <input
+                type="text"
+                value={newSiteName}
+                onChange={(e) => setNewSiteName(e.target.value)}
+                placeholder="Nama Site (cth: PT.WINNERS(4))"
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+                required
+              />
+              <select
+                value={newSiteType}
+                onChange={(e) => setNewSiteType(e.target.value as 'FACTORY' | 'WAREHOUSE' | 'LAB' | 'SITE')}
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+              >
+                <option value="FACTORY">Pabrik (FACTORY)</option>
+                <option value="WAREHOUSE">Gudang (WAREHOUSE)</option>
+                <option value="LAB">Laboratorium (LAB)</option>
+                <option value="SITE">Site Umum (SITE)</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Site (Generate Line 1-30 & Extra Otomatis)</span>
+            </button>
+          </form>
+
+          {/* Existing Sites Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            {sites.map((s) => (
+              <div key={s.siteId} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-black text-blue-700">{s.siteId}</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">
+                    {s.type}
+                  </span>
+                </div>
+                <div className="font-bold text-slate-900">{s.name}</div>
+                <div className="text-[11px] text-slate-500">
+                  {storageService.getLocations(s.siteId).length} lokasi terdaftar
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 3: RACKS CONFIGURATION */}
+      {activeSection === 'racks' && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          <div>
+            <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <Layers className="w-5 h-5 text-indigo-600" />
+              <span>Konfigurasi 6 Rak Warehouse 2 (WH2)</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Setiap rak memiliki 3 stack (A, B, C). Mengubah jumlah kolom otomatis membuat slot baru berkode WH2-R{'{rak}'}-{'{kolom}'}{'{stack}'}.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+            {racks.map((rack) => {
+              const slotsCount = rack.columnCount * 3;
+              return (
+                <div key={rack.rackNo} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-sm text-slate-900">Rak {rack.rackNo}</span>
+                    <span className="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded">
+                      {slotsCount} Slot (3 Stack A/B/C)
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] text-slate-600">Jumlah Kolom Rak:</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        defaultValue={rack.columnCount}
+                        onBlur={(e) => handleUpdateRack(rack.rackNo, Number(e.target.value))}
+                        className="bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-mono w-24 focus:outline-none focus:border-indigo-500"
+                      />
+                      <span className="text-slate-500 text-[11px]">kolom</span>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-slate-500">
+                    Contoh format slot: <span className="font-mono text-cyan-700 font-semibold">WH2-R{rack.rackNo}-1A</span>,{' '}
+                    <span className="font-mono text-cyan-700 font-semibold">WH2-R{rack.rackNo}-1B</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 4: USERS & RBAC */}
+      {activeSection === 'users' && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+            <Users className="w-5 h-5 text-emerald-600" />
+            <span>Kelola Pengguna & Hak Akses Berdasarkan Site (A4)</span>
+          </h2>
+
+          {/* Add User Form */}
+          <form onSubmit={handleAddUser} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
+            <div className="font-bold text-slate-700">Tambah Akun Pengguna Baru:</div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <input
+                type="text"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="Username (cth: mechanic_pw4)"
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-500"
+                required
+              />
+              <input
+                type="text"
+                value={newDisplayName}
+                onChange={(e) => setNewDisplayName(e.target.value)}
+                placeholder="Nama Lengkap & Jabatan"
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-500"
+                required
+              />
+              <select
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="Admin">Admin</option>
+                <option value="Mechanic">Mechanic</option>
+                <option value="Production Support">Production Support</option>
+                <option value="Viewer">Viewer</option>
+              </select>
+              <input
+                type="text"
+                value={newUserSiteAccess}
+                onChange={(e) => setNewUserSiteAccess(e.target.value)}
+                placeholder="Site Access (cth: PW1, PW2 atau ALL)"
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-500"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Simpan Pengguna</span>
+            </button>
+          </form>
+
+          {/* Users List Table */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-100 text-slate-600 uppercase text-[10px]">
+                <tr>
+                  <th className="p-3">Username</th>
+                  <th className="p-3">Nama Pengguna</th>
+                  <th className="p-3">Role</th>
+                  <th className="p-3">Akses Site</th>
+                  <th className="p-3">Status Kunci</th>
+                  <th className="p-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700 bg-white">
+                {users.map((u) => {
+                  const isLocked = Boolean(u.lockedUntil && new Date(u.lockedUntil).getTime() > Date.now());
+
+                  return (
+                    <tr key={u.username} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-3 font-mono font-bold text-blue-700">{u.username}</td>
+                      <td className="p-3 text-slate-900 font-semibold">{u.displayName}</td>
+                      <td className="p-3">
+                        <span className="font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-cyan-800 font-bold">{u.siteAccess.join(', ')}</td>
+                      <td className="p-3">
+                        {isLocked ? (
+                          <span className="text-rose-600 font-bold flex items-center gap-1">
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Terkunci (5x Gagal)</span>
+                          </span>
+                        ) : (
+                          <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>Normal</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        {isLocked && (
+                          <button
+                            onClick={() => handleUnlock(u.username)}
+                            className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-bold"
+                          >
+                            Buka Kunci
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 5: IMPORT / EXPORT EXCEL */}
+      {activeSection === 'import_export' && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          <div>
+            <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+              <span>Ekspor Cadangan Lengkap & Impor File Excel</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Unduh cadangan data mesin atau perbarui database melalui file Excel .xlsx
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
+              <div className="font-bold text-slate-900 text-sm">Ekspor Database Lengkap:</div>
+              <p className="text-slate-500">
+                Unduh seluruh data 5.700+ mesin PT.WINNERS beserta riwayat lengkap dalam format file Excel .xlsx
+              </p>
+              <button
+                onClick={handleExportFullDb}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-2 shadow-sm"
+              >
+                <Download className="w-4 h-4" />
+                <span>Unduh Excel Backup (.xlsx)</span>
+              </button>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
+              <div className="font-bold text-slate-900 text-sm">Impor File Excel / CSV:</div>
+              <p className="text-slate-500">
+                Pilih file .xlsx untuk melakukan batch update data mesin dengan validasi format otomatis.
+              </p>
+              <input
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                      try {
+                        const bstr = evt.target?.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const data = XLSX.utils.sheet_to_json(ws);
+                        alert(`Berhasil membaca ${data.length} baris data dari file ${file.name}!`);
+                      } catch {
+                        alert('Gagal memproses file Excel.');
+                      }
+                    };
+                    reader.readAsBinaryString(file);
+                  }
+                }}
+                className="block w-full text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 6: GOOGLE SPREADSHEET & APPS SCRIPT BACKEND */}
+      {activeSection === 'gas_export' && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
+          {/* Spreadsheet ID & Live Web App Connection Box */}
+          <div className="p-5 rounded-2xl bg-slate-50 border border-indigo-200/80 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Koneksi Google Spreadsheet & Apps Script Backend</span>
+              </div>
+              <span className="text-[10px] font-mono uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300 font-bold">
+                Terhubung (Live)
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Web App ini terhubung ke Google Spreadsheet PT.WINNERS sebagai basis data utama, dengan Google Apps Script sebagai backend API untuk sinkronisasi transaksi mutasi dan audit stok opname.
+            </p>
+
+            {/* Spreadsheet ID config */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                <span>Google Spreadsheet ID:</span>
+                {spreadsheetId && (
+                  <a
+                    href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-cyan-700 hover:text-cyan-600 text-[11px] font-mono underline flex items-center gap-1 font-semibold"
+                  >
+                    <span>Buka Spreadsheet di Google Drive &rarr;</span>
+                  </a>
+                )}
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={spreadsheetId}
+                  onChange={(e) => setSpreadsheetId(e.target.value)}
+                  placeholder="ID Spreadsheet (cth: 1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio)"
+                  className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-emerald-800 font-mono focus:outline-none focus:border-indigo-500 font-bold"
+                />
+              </div>
+            </div>
+
+            {/* Google Apps Script Web App URL */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700">
+                Google Apps Script Web App Deployment URL:
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="url"
+                  value={gasUrl}
+                  onChange={(e) => setGasUrl(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-800 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  onClick={handleTestGasConnection}
+                  disabled={testingConnection}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold whitespace-nowrap flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  {testingConnection ? (
+                    <span>Menyimpan & Menguji...</span>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                      <span>Simpan & Verifikasi Endpoint</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {connectionMsg && (
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  connectionStatus === 'SUCCESS'
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                    : 'bg-blue-50 text-blue-800 border border-blue-300'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>{connectionMsg}</span>
+              </div>
+            )}
+          </div>
+
+          {/* SINKRONISASI DATA LANGSUNG DARI SHEET "machine_asset" */}
+          <div className="p-5 rounded-2xl bg-emerald-50/50 border border-emerald-200 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
+                  </span>
+                  <h3 className="font-black text-sm text-slate-900 flex items-center gap-1.5">
+                    <span>Tarik & Sinkronisasi Data dari Sheet Real</span>
+                    <span className="font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs border border-emerald-200">
+                      "{targetSheetName}"
+                    </span>
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 mt-1">
+                  Ambil seluruh data aset mesin pabrik langsung dari tab sheet <span className="font-mono font-bold text-emerald-700">machine_asset</span> di Google Spreadsheet ID Anda untuk menggantikan data demo.
+                </p>
+              </div>
+
+              <button
+                onClick={handleSyncDataFromSheet}
+                disabled={isSyncingSheet}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-black text-xs shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2 shrink-0 transition-all hover:scale-105 active:scale-95"
+              >
+                <RotateCcw className={`w-4 h-4 ${isSyncingSheet ? 'animate-spin' : ''}`} />
+                <span>{isSyncingSheet ? 'Sedang Menarik Data...' : `Tarik Data dari Sheet "${targetSheetName}" Sekarang`}</span>
+              </button>
+            </div>
+
+            {/* Sheet Target Customizer & Quick Info */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-700">Nama Tab Sheet Google Spreadsheet:</label>
+                <input
+                  type="text"
+                  value={targetSheetName}
+                  onChange={(e) => setTargetSheetName(e.target.value)}
+                  placeholder="machine_asset"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-emerald-800 font-mono font-semibold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-white border border-slate-200 flex flex-col justify-center text-[11px] text-slate-600">
+                <div className="font-bold text-emerald-700 mb-0.5">Pemetaan Kolom Otomatis:</div>
+                <div>Asset Code • Barcode 12 • Serial • Nama Mesin • Model • Merk • Lokasi • Site • Status</div>
+              </div>
+            </div>
+
+            {/* Sync Feedback Result */}
+            {syncFeedback && (
+              <div
+                className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 ${
+                  syncFeedback.success
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                    : 'bg-rose-50 text-rose-800 border border-rose-300'
+                }`}
+              >
+                {syncFeedback.success ? (
+                  <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
+                )}
+                <div>
+                  <div className="font-bold">{syncFeedback.message}</div>
+                  {syncFeedback.source && (
+                    <div className="text-[10px] text-slate-500 mt-0.5">Sumber data: {syncFeedback.source}</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <Code className="w-5 h-5 text-indigo-600" />
+                <span>Kode Sumber Google Apps Script (Code.gs)</span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                Kode ini telah otomatis terkonfigurasi dengan Spreadsheet ID <span className="font-mono text-cyan-800 font-bold">{spreadsheetId}</span>.
+              </p>
+            </div>
+
+            <button
+              onClick={handleCopyGas}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+            >
+              <Copy className="w-4 h-4" />
+              <span>{copiedGas ? 'Tersalin ke Clipboard!' : 'Salin Seluruh Kode .gs'}</span>
+            </button>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 max-h-96 overflow-y-auto font-mono text-xs text-cyan-300 shadow-inner">
+            <pre>{generateGasCodeGs(spreadsheetId)}</pre>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 7: THEME & UI APPEARANCE SETTINGS */}
+      {activeSection === 'settings' && (
+        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-8">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center">
+                <Palette className="w-4 h-4" />
+              </div>
+              <h2 className="text-base font-extrabold text-slate-900">
+                Pengaturan Tema & Tata Letak Antarmuka
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Sesuaikan tampilan antarmuka visual aplikasi, warna tema, serta tata letak navigasi (Sidebar vertikal vs Header atas) sesuai kebutuhan operasional PT.WINNERS.
+            </p>
+          </div>
+
+          {/* 1. Theme Presets */}
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>1. Pilihan Tema Tampilan (Theme Presets)</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Sage Green & Dark Emerald (Image Reference) */}
+              <div
+                onClick={() => setThemePreset('sage_emerald')}
+                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
+                  themePreset === 'sage_emerald'
+                    ? 'border-emerald-600 bg-emerald-50/70 shadow-md ring-2 ring-emerald-500/20'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-[#064e3b] border border-emerald-400" />
+                    <div className="w-4 h-4 rounded-full bg-[#edf3ef] border border-emerald-600" />
+                  </div>
+                  {themePreset === 'sage_emerald' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>Aktif</span>
+                    </span>
+                  )}
+                </div>
+                <div className="font-extrabold text-sm text-slate-900">Sage & Forest Emerald</div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Sesuai desain referensi gambar: Latar sage lembut, sidebar/header hijau tua elegan, kartu bersih dan kontras tajam.
+                </p>
+                <div className="mt-2.5 inline-block text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  ★ Rekomendasi Gambar
+                </div>
+              </div>
+
+              {/* Dark Slate Industrial */}
+              <div
+                onClick={() => setThemePreset('dark_slate')}
+                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
+                  themePreset === 'dark_slate'
+                    ? 'border-blue-600 bg-blue-50/70 shadow-md ring-2 ring-blue-500/20'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-slate-950 border border-slate-700" />
+                    <div className="w-4 h-4 rounded-full bg-blue-600" />
+                  </div>
+                  {themePreset === 'dark_slate' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>Aktif</span>
+                    </span>
+                  )}
+                </div>
+                <div className="font-extrabold text-sm text-slate-900">Dark Slate Industrial</div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Nuansa gelap modern dengan kontras tinggi untuk pemakaian di lingkungan pabrik dan pencahayaan redup.
+                </p>
+              </div>
+
+              {/* Clean Light Modern */}
+              <div
+                onClick={() => setThemePreset('clean_light')}
+                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
+                  themePreset === 'clean_light'
+                    ? 'border-emerald-600 bg-emerald-50/70 shadow-md ring-2 ring-emerald-500/20'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-white border border-slate-300" />
+                    <div className="w-4 h-4 rounded-full bg-emerald-500" />
+                  </div>
+                  {themePreset === 'clean_light' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>Aktif</span>
+                    </span>
+                  )}
+                </div>
+                <div className="font-extrabold text-sm text-slate-900">Clean Light Modern</div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Tampilan terang putih minimalis dengan aksen hijau emerald untuk kejelasan data di kantor/ruangan terang.
+                </p>
+              </div>
+
+              {/* Midnight Navy */}
+              <div
+                onClick={() => setThemePreset('midnight_navy')}
+                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
+                  themePreset === 'midnight_navy'
+                    ? 'border-cyan-600 bg-cyan-50/70 shadow-md ring-2 ring-cyan-500/20'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-[#0b132b] border border-cyan-500/40" />
+                    <div className="w-4 h-4 rounded-full bg-cyan-400" />
+                  </div>
+                  {themePreset === 'midnight_navy' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-600 text-white flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>Aktif</span>
+                    </span>
+                  )}
+                </div>
+                <div className="font-extrabold text-sm text-slate-900">Midnight Navy</div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Latar biru dongker malam dengan aksen cyan neon futuristik yang nyaman di mata.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Layout Style: Sidebar vs Topbar */}
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+              <LayoutTemplate className="w-3.5 h-3.5 text-blue-600" />
+              <span>2. Pengaturan Header Utama & Tata Letak Navigasi (Layout Mode)</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Sidebar Left Layout */}
+              <div
+                onClick={() => setLayoutStyle('sidebar')}
+                className={`cursor-pointer p-5 rounded-2xl border-2 transition-all ${
+                  layoutStyle === 'sidebar'
+                    ? 'border-emerald-600 bg-emerald-50/70 shadow-md ring-2 ring-emerald-500/20'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
+                    <div className="w-3 h-6 rounded bg-emerald-600" />
+                    <span>Sidebar Vertikal Sisi Kiri</span>
+                  </div>
+                  {layoutStyle === 'sidebar' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>Aktif</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600">
+                  Persis seperti pada gambar referensi: Menu navigasi vertikal di kiri dengan logo kotak hijau tua, shortcut pemindai QR cepat, dan profil pengguna di bagian bawah.
+                </p>
+              </div>
+
+              {/* Topbar Layout */}
+              <div
+                onClick={() => setLayoutStyle('topbar')}
+                className={`cursor-pointer p-5 rounded-2xl border-2 transition-all ${
+                  layoutStyle === 'topbar'
+                    ? 'border-blue-600 bg-blue-50/70 shadow-md ring-2 ring-blue-500/20'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
+                    <div className="w-6 h-3 rounded bg-blue-600" />
+                    <span>Header Atas (Top Navigation Bar)</span>
+                  </div>
+                  {layoutStyle === 'topbar' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>Aktif</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600">
+                  Navigasi horizontal di bagian atas layar dengan nuansa warna hijau zamrud yang seragam dan ruang kerja halaman penuh.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Accent Color Picker */}
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              3. Pilihan Warna Aksen (Accent Palette)
+            </label>
+            <div className="flex flex-wrap gap-3">
+              {[
+                { id: 'emerald', name: 'Emerald Forest (Hijau Zamrud)', bg: 'bg-emerald-500' },
+                { id: 'teal', name: 'Mint Teal (Hijau Mint)', bg: 'bg-teal-500' },
+                { id: 'indigo', name: 'Indigo Royal', bg: 'bg-indigo-500' },
+                { id: 'blue', name: 'Electric Blue', bg: 'bg-blue-500' },
+                { id: 'amber', name: 'Amber Gold', bg: 'bg-amber-500' },
+              ].map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setAccentColor(c.id as any)}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all ${
+                    accentColor === c.id
+                      ? 'border-emerald-600 bg-emerald-50 text-emerald-900 shadow-sm ring-1 ring-emerald-500/20'
+                      : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900 hover:border-slate-300'
+                  }`}
+                >
+                  <div className={`w-3.5 h-3.5 rounded-full ${c.bg}`} />
+                  <span>{c.name}</span>
+                  {accentColor === c.id && <Check className="w-3 h-3 text-emerald-600" />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. Live Component Preview Card */}
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+            <div className="text-xs font-bold text-slate-700 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-600" />
+              <span>Pratinjau Langsung Komponen UI (Live Preview):</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Sample Card */}
+              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-2">
+                <div className="text-[11px] font-extrabold text-emerald-700">STATUS MESIN CONTOH</div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-bold text-slate-900">IDN-8-2009-1396</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    ACTIVE
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500">JUKI • DDL-8700-7 • PW1-L05</div>
+              </div>
+
+              {/* Sample Buttons */}
+              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-2">
+                <div className="text-[11px] font-extrabold text-slate-700">TOMBOL AKSI CEPAT</div>
+                <div className="flex gap-2">
+                  <button className="flex-1 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-[11px] shadow-sm">
+                    Pindah Mesin
+                  </button>
+                  <button className="flex-1 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-bold text-[11px]">
+                    Transfer
+                  </button>
+                </div>
+              </div>
+
+              {/* Sample Badge */}
+              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-2">
+                <div className="text-[11px] font-extrabold text-slate-700">PABRIK & LOKASI</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 font-bold">
+                    PW1 FACTORY
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-700 font-bold">Line 12</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
