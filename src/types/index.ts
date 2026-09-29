@@ -190,7 +190,7 @@ export interface AuditLog {
   detail: string;
 }
 
-export type ThemePreset = 'sage_emerald' | 'dark_slate' | 'clean_light' | 'midnight_navy';
+export type ThemePreset = 'sky_cyan' | 'sage_emerald' | 'dark_slate' | 'clean_light' | 'midnight_navy';
 export type NavLayoutStyle = 'sidebar' | 'topbar';
 export type AccentColor = 'emerald' | 'teal' | 'indigo' | 'blue' | 'amber';
 

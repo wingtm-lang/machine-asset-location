@@ -39,11 +39,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenBenchmark,
 }) => {
   const { currentUser, language, setLanguage, logout, switchUserQuick, canPerformAction } = useAuth();
-  const { themePreset, setThemePreset, layoutStyle, setLayoutStyle, isSageEmerald } = useTheme();
+  const { themePreset, setThemePreset, layoutStyle, setLayoutStyle, isSkyCyan, isSageEmerald } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const users = storageService.getUsers();
+
+  const isSkyCyanActive = isSkyCyan || themePreset === 'sky_cyan';
 
   const navItems = [
     { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, show: true, badge: 'Live' },
@@ -55,7 +57,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'admin', labelKey: 'admin', icon: ShieldAlert, show: canPerformAction('ADMIN') },
   ];
 
-  const sidebarThemeClass = isSageEmerald
+  const sidebarThemeClass = isSkyCyanActive
+    ? 'bg-[#0284c7] text-sky-50 border-r border-sky-700/60 shadow-2xl'
+    : isSageEmerald
     ? 'bg-[#064e3b] text-emerald-50 border-r border-emerald-800/60 shadow-2xl'
     : themePreset === 'clean_light'
     ? 'bg-white text-slate-800 border-r border-slate-200 shadow-md'
@@ -63,19 +67,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ? 'bg-[#0f172a] text-slate-100 border-r border-slate-800 shadow-2xl'
     : 'bg-slate-900 text-slate-100 border-r border-slate-800 shadow-2xl';
 
-  const brandBgClass = isSageEmerald
+  const brandBgClass = isSkyCyanActive
+    ? 'bg-sky-950/40 border border-sky-300/40 shadow-inner backdrop-blur-sm'
+    : isSageEmerald
     ? 'bg-emerald-950/80 border border-emerald-700/50 shadow-inner'
     : themePreset === 'clean_light'
     ? 'bg-slate-50 border border-slate-200'
     : 'bg-slate-950/80 border border-slate-800';
 
-  const activeNavItemClass = isSageEmerald
+  const activeNavItemClass = isSkyCyanActive
+    ? 'bg-white text-sky-950 font-black shadow-lg shadow-sky-950/20 border border-sky-200/80'
+    : isSageEmerald
     ? 'bg-emerald-600/90 text-white font-bold shadow-lg shadow-emerald-950/40 border border-emerald-400/30 ring-1 ring-emerald-400/20'
     : themePreset === 'clean_light'
     ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-600/20'
     : 'bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30';
 
-  const inactiveNavItemClass = isSageEmerald
+  const inactiveNavItemClass = isSkyCyanActive
+    ? 'text-sky-100 hover:text-white hover:bg-sky-700/60'
+    : isSageEmerald
     ? 'text-emerald-100/80 hover:text-white hover:bg-emerald-800/60'
     : themePreset === 'clean_light'
     ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -203,7 +213,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           <button
             onClick={() => {
-              const presets: ('sage_emerald' | 'dark_slate' | 'clean_light' | 'midnight_navy')[] = [
+              const presets: ('sky_cyan' | 'sage_emerald' | 'dark_slate' | 'clean_light' | 'midnight_navy')[] = [
+                'sky_cyan',
                 'sage_emerald',
                 'dark_slate',
                 'clean_light',

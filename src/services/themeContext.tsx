@@ -12,6 +12,7 @@ interface ThemeContextType {
   setAccentColor: (color: AccentColor) => void;
   setCardRadius: (radius: string) => void;
   // Helpers
+  isSkyCyan: boolean;
   isSageEmerald: boolean;
   isDarkSlate: boolean;
   isCleanLight: boolean;
@@ -25,7 +26,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const settings = storageService.getSettings();
 
   const [themePreset, setThemePresetState] = useState<ThemePreset>(
-    settings.themePreset || 'sage_emerald'
+    settings.themePreset || 'sky_cyan'
   );
   const [layoutStyle, setLayoutStyleState] = useState<NavLayoutStyle>(
     settings.layoutStyle || 'sidebar'
@@ -72,6 +73,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setLayoutStyle,
         setAccentColor,
         setCardRadius,
+        isSkyCyan: themePreset === 'sky_cyan',
         isSageEmerald: themePreset === 'sage_emerald',
         isDarkSlate: themePreset === 'dark_slate',
         isCleanLight: themePreset === 'clean_light',

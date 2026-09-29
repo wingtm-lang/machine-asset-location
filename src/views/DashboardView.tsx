@@ -130,23 +130,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Welcome Banner */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 text-white shadow-md relative overflow-hidden">
+      <div className="p-6 rounded-3xl bg-gradient-to-r from-sky-700 via-cyan-600 to-teal-700 text-white shadow-lg relative overflow-hidden">
         <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-100 bg-white/15 px-2.5 py-0.5 rounded-full border border-white/20">
+              <span className="text-xs font-bold uppercase tracking-wider text-sky-100 bg-white/15 px-2.5 py-0.5 rounded-full border border-white/20">
                 PT.WINNERS Asset System
               </span>
-              <span className="text-xs text-emerald-100/80 font-mono">
+              <span className="text-xs text-sky-100/80 font-mono">
                 Site Access: {currentUser?.siteAccess.join(', ')}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               {getTranslation('dashboard', language)} — {currentUser?.displayName}
             </h1>
-            <p className="text-xs sm:text-sm text-emerald-50/90">
+            <p className="text-xs sm:text-sm text-sky-50/90">
               {isViewer
                 ? 'Ringkasan Eksekutif & Distribusi Aset Mesin Jahit Pabrik'
                 : 'Pusat Kontrol Pelacakan & Mutasi Aset Mesin Jahit (PW1, PW2, PW3, WH2, SW, QA)'}
@@ -156,16 +156,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={onOpenScanner}
-              className="px-4 py-2.5 bg-white hover:bg-emerald-50 text-emerald-900 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95"
+              className="px-4 py-2.5 bg-white hover:bg-sky-50 text-sky-950 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95"
             >
-              <Search className="w-4 h-4 text-emerald-700" />
+              <Search className="w-4 h-4 text-sky-700" />
               <span>{getTranslation('scan', language)}</span>
             </button>
 
             {canPerformAction('MOVE') && (
               <button
                 onClick={() => onNavigateTab('move')}
-                className="px-4 py-2.5 bg-emerald-900/60 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-emerald-500/30"
+                className="px-4 py-2.5 bg-sky-950/60 hover:bg-sky-950 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-sky-400/30"
               >
                 <Layers className="w-4 h-4" />
                 <span>{getTranslation('move', language)}</span>
@@ -175,7 +175,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {canPerformAction('OPNAME') && (
               <button
                 onClick={() => onNavigateTab('opname')}
-                className="px-4 py-2.5 bg-teal-900/60 hover:bg-teal-900 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-teal-500/30"
+                className="px-4 py-2.5 bg-cyan-950/60 hover:bg-cyan-950 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-cyan-400/30"
               >
                 <ClipboardCheck className="w-4 h-4" />
                 <span>{getTranslation('opname', language)}</span>
@@ -185,7 +185,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               onClick={handleSyncFromSheet}
               disabled={isSyncing}
-              className="px-4 py-2.5 bg-emerald-950/70 hover:bg-emerald-950 disabled:opacity-50 text-emerald-100 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-emerald-400/20"
+              className="px-4 py-2.5 bg-sky-950/80 hover:bg-sky-950 disabled:opacity-50 text-sky-100 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-sky-300/30"
               title="Tarik data terbaru dari Google Spreadsheet tab 'machine_asset'"
             >
               <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />

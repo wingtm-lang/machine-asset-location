@@ -29,7 +29,7 @@ import {
 
 const MainAppInner: React.FC = () => {
   const { currentUser, language, canPerformAction } = useAuth();
-  const { themePreset, layoutStyle, setLayoutStyle, isSageEmerald, isCleanLight, isMidnightNavy } = useTheme();
+  const { themePreset, layoutStyle, setLayoutStyle, isSkyCyan, isSageEmerald, isCleanLight, isMidnightNavy } = useTheme();
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -80,7 +80,9 @@ const MainAppInner: React.FC = () => {
     setActiveTab('transfers');
   };
 
-  const pageBgClass = isSageEmerald
+  const pageBgClass = isSkyCyan || themePreset === 'sky_cyan'
+    ? 'bg-[#9be0f0] text-slate-900 selection:bg-cyan-600 selection:text-white'
+    : isSageEmerald
     ? 'bg-[#edf3ef] text-slate-800 selection:bg-emerald-600 selection:text-white'
     : isCleanLight
     ? 'bg-slate-100 text-slate-800 selection:bg-emerald-600 selection:text-white'
@@ -114,7 +116,9 @@ const MainAppInner: React.FC = () => {
         {/* Top Header Bar in Sidebar Mode */}
         {isSidebarLayout && (
           <header className={`hidden md:flex items-center justify-between px-6 py-3 border-b ${
-            isSageEmerald
+            isSkyCyan || themePreset === 'sky_cyan'
+              ? 'bg-white/85 backdrop-blur-md border-cyan-200/90 text-slate-800 shadow-sm'
+              : isSageEmerald
               ? 'bg-white/80 backdrop-blur-md border-emerald-900/10 text-slate-800 shadow-sm'
               : isCleanLight
               ? 'bg-white border-slate-200 text-slate-800 shadow-sm'
@@ -124,11 +128,15 @@ const MainAppInner: React.FC = () => {
           }`}>
             <div className="flex items-center gap-3">
               <span className={`text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
-                isSageEmerald ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-800 text-slate-300'
+                isSkyCyan || themePreset === 'sky_cyan'
+                  ? 'bg-sky-100 text-sky-900'
+                  : isSageEmerald
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-slate-800 text-slate-300'
               }`}>
                 {getTranslation(activeTab, language) || activeTab}
               </span>
-              <span className="text-xs text-slate-400 font-medium">
+              <span className="text-xs text-slate-600 font-medium">
                 PT.WINNERS Machine Asset Tracking • Live System
               </span>
             </div>
@@ -137,19 +145,21 @@ const MainAppInner: React.FC = () => {
               <button
                 onClick={() => setLayoutStyle('topbar')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                  isSageEmerald
+                  isSkyCyan || themePreset === 'sky_cyan'
+                    ? 'bg-sky-50 text-sky-900 border-sky-200 hover:bg-sky-100'
+                    : isSageEmerald
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                     : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                 }`}
                 title="Beralih ke tampilan Header Atas"
               >
-                <LayoutTemplate className="w-3.5 h-3.5 text-emerald-600" />
+                <LayoutTemplate className="w-3.5 h-3.5 text-sky-600" />
                 <span>Mode Header</span>
               </button>
 
               <button
                 onClick={() => setIsScannerOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow-sm shadow-emerald-700/20 hover:scale-105 active:scale-95 transition-all"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 text-white text-xs font-bold shadow-sm shadow-cyan-800/20 hover:scale-105 active:scale-95 transition-all"
               >
                 <QrCode className="w-4 h-4" />
                 <span>{getTranslation('scan', language)}</span>

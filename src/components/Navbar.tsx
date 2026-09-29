@@ -42,11 +42,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   const current = activeTab || currentTab || 'dashboard';
   const handleTabSelect = onSelectTab || setCurrentTab || (() => {});
   const { currentUser, language, setLanguage, logout, switchUserQuick, canPerformAction } = useAuth();
-  const { themePreset, setThemePreset, isSageEmerald } = useTheme();
+  const { themePreset, setThemePreset, isSkyCyan, isSageEmerald } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const users = storageService.getUsers();
+  const isSkyCyanActive = isSkyCyan || themePreset === 'sky_cyan';
 
   const navItems = [
     { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, show: true },
@@ -58,7 +59,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'admin', labelKey: 'admin', icon: ShieldAlert, show: canPerformAction('ADMIN') },
   ];
 
-  const headerBgClass = isSageEmerald
+  const headerBgClass = isSkyCyanActive
+    ? 'bg-[#0284c7] text-white border-b border-sky-600 shadow-lg'
+    : isSageEmerald
     ? 'bg-[#064e3b] text-white border-b border-emerald-800/80 shadow-lg'
     : themePreset === 'clean_light'
     ? 'bg-white text-slate-800 border-b border-slate-200 shadow-md'
@@ -66,13 +69,17 @@ export const Navbar: React.FC<NavbarProps> = ({
     ? 'bg-[#0f172a] text-slate-100 border-b border-slate-800 shadow-xl'
     : 'bg-slate-900/95 text-slate-100 border-b border-slate-800 shadow-xl';
 
-  const navActiveItemClass = isSageEmerald
+  const navActiveItemClass = isSkyCyanActive
+    ? 'bg-white text-sky-950 font-black shadow-md shadow-sky-950/20'
+    : isSageEmerald
     ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-950/40 border border-emerald-400/40'
     : themePreset === 'clean_light'
     ? 'bg-emerald-600 text-white font-bold shadow-sm'
     : 'bg-blue-600 text-white font-bold shadow-md shadow-blue-600/25';
 
-  const navInactiveItemClass = isSageEmerald
+  const navInactiveItemClass = isSkyCyanActive
+    ? 'text-sky-100 hover:text-white hover:bg-sky-700/60'
+    : isSageEmerald
     ? 'text-emerald-100/80 hover:text-white hover:bg-emerald-800/60'
     : themePreset === 'clean_light'
     ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -160,7 +167,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Theme Quick Switcher */}
             <button
               onClick={() => {
-                const presets: ('sage_emerald' | 'dark_slate' | 'clean_light' | 'midnight_navy')[] = [
+                const presets: ('sky_cyan' | 'sage_emerald' | 'dark_slate' | 'clean_light' | 'midnight_navy')[] = [
+                  'sky_cyan',
                   'sage_emerald',
                   'dark_slate',
                   'clean_light',
