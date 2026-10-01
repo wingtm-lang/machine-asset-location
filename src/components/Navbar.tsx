@@ -16,11 +16,13 @@ import {
   LayoutDashboard,
   Layers,
   Palette,
+  Grid,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { useTheme } from '../services/themeContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
+import { PtWinnersLogo } from './PtWinnersLogo';
 
 interface NavbarProps {
   currentTab?: string;
@@ -41,17 +43,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const current = activeTab || currentTab || 'dashboard';
   const handleTabSelect = onSelectTab || setCurrentTab || (() => {});
-  const { currentUser, language, setLanguage, logout, switchUserQuick, canPerformAction } = useAuth();
+  const { currentUser, language, setLanguage, logout, canPerformAction } = useAuth();
   const { themePreset, setThemePreset, isSkyCyan, isSageEmerald } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
-  const users = storageService.getUsers();
   const isSkyCyanActive = isSkyCyan || themePreset === 'sky_cyan';
 
   const navItems = [
     { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, show: true },
     { id: 'machines', labelKey: 'machines', icon: Boxes, show: true },
+    { id: 'rackmap', labelKey: 'rackmap', icon: Grid, show: true },
     { id: 'move', labelKey: 'move', icon: Layers, show: canPerformAction('MOVE') || canPerformAction('CHANGE_STATUS') },
     { id: 'transfers', labelKey: 'transfers', icon: ArrowRightLeft, show: canPerformAction('TRANSFER') },
     { id: 'opname', labelKey: 'opname', icon: ClipboardCheck, show: canPerformAction('OPNAME') },
@@ -95,10 +97,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => handleTabSelect('dashboard')}
               className="flex items-center gap-2.5 text-left group focus:outline-none"
             >
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-400 to-teal-200 p-0.5 shadow-lg group-hover:scale-105 transition-transform">
-                <div className="w-full h-full bg-[#064e3b] rounded-[10px] flex items-center justify-center">
-                  <Building2 className="w-5 h-5 text-emerald-300" />
-                </div>
+              <div className="w-10 h-10 rounded-xl bg-white p-0.5 shadow-lg group-hover:scale-105 transition-transform flex items-center justify-center shrink-0 border border-white/20 overflow-hidden">
+                <PtWinnersLogo className="w-9 h-9 object-contain" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
@@ -222,53 +222,30 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               {userMenuOpen && (
                 <div
-                  className={`absolute right-0 mt-2 w-64 rounded-2xl shadow-2xl border p-2 z-50 ${
+                  className={`absolute right-0 mt-2 w-60 rounded-2xl shadow-2xl border p-2 z-50 ${
                     isSageEmerald
                       ? 'bg-emerald-950 border-emerald-700/80 text-white'
                       : 'bg-slate-900 border-slate-800 text-white'
                   }`}
                 >
-                  <div className="p-2 border-b border-emerald-800/60 mb-2">
+                  <div className="p-2 border-b border-emerald-800/60 mb-1">
                     <div className="font-bold text-xs">{currentUser?.displayName}</div>
-                    <div className="text-[11px] text-emerald-300">@{currentUser?.username}</div>
+                    <div className="text-[11px] text-emerald-300">NIK: @{currentUser?.username}</div>
+                    <div className="text-[10px] text-emerald-200/70 mt-0.5">
+                      Role: {currentUser?.role}
+                    </div>
                     <div className="text-[10px] text-emerald-200/70">
                       Site: {currentUser?.siteAccess.join(', ')}
                     </div>
                   </div>
 
-                  <div className="text-[10px] font-bold uppercase text-emerald-300/60 px-2 mb-1">
-                    Ganti Akun Cepat:
-                  </div>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {users.map((u) => (
-                      <button
-                        key={u.username}
-                        onClick={() => {
-                          switchUserQuick(u.username);
-                          setUserMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs transition-colors ${
-                          u.username === currentUser?.username
-                            ? 'bg-emerald-600 text-white font-bold'
-                            : 'text-emerald-100 hover:bg-emerald-900/60'
-                        }`}
-                      >
-                        <div className="truncate text-left">
-                          <div className="font-semibold text-[11px] truncate">{u.displayName}</div>
-                          <div className="text-[9px] text-emerald-300 truncate">{u.role}</div>
-                        </div>
-                        {u.username === currentUser?.username && <UserCheck className="w-3 h-3 text-white shrink-0" />}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mt-2 pt-2 border-t border-emerald-800/60">
+                  <div className="pt-1">
                     <button
                       onClick={() => {
                         logout();
                         setUserMenuOpen(false);
                       }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200"
+                      className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 transition-colors"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>{getTranslation('logout', language)}</span>

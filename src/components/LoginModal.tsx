@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   KeyRound,
 } from 'lucide-react';
+import { PtWinnersLogo } from './PtWinnersLogo';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { soundService } from '../services/sound';
@@ -62,12 +63,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen }) => {
       <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col">
         {/* Banner */}
         <div className="p-6 bg-slate-50 border-b border-slate-100 text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center mx-auto shadow-xs">
-            <Lock className="w-6 h-6" />
+          <div className="w-14 h-14 rounded-2xl bg-white p-1 border border-slate-200 shadow-md flex items-center justify-center mx-auto overflow-hidden">
+            <PtWinnersLogo className="w-11 h-11 object-contain" />
           </div>
-          <h2 className="text-xl font-extrabold text-slate-900">
-            PT.WINNERS Machine Tracker
-          </h2>
+          <div className="flex items-center justify-center gap-2">
+            <PtWinnersLogo className="w-5 h-5 object-contain" />
+            <h2 className="text-xl font-extrabold text-slate-900">
+              PT.WINNERS Machine Tracker
+            </h2>
+          </div>
           <p className="text-xs text-slate-500">
             Masuk untuk mengakses sistem pelacakan & mutasi lokasi mesin
           </p>

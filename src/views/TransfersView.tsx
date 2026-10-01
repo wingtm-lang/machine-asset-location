@@ -35,7 +35,12 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [sendAssetCodesInput, setSendAssetCodesInput] = useState<string>(
     batchMachines && batchMachines.length > 0 ? batchMachines.map((m) => m.assetCode).join(', ') : ''
   );
+  const [vehicleNo, setVehicleNo] = useState<string>('');
+  const [driverName, setDriverName] = useState<string>('');
   const [transferNote, setTransferNote] = useState<string>('');
+  const [isSending, setIsSending] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   // Receive Modal states
   const [receivingTransfer, setReceivingTransfer] = useState<Transfer | null>(null);
@@ -69,10 +74,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   }, [receivingTransfer]);
 
   // Handle Send Transfer (Step 1)
-  const handleSendTransfer = (e: React.FormEvent) => {
+  const handleSendTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     setFeedback(null);
-    if (!currentUser) return;
+    if (!currentUser || isSending) return;
 
     const codes = sendAssetCodesInput
       .split(/[\s,;\n]+/)
@@ -84,58 +89,86 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       return;
     }
 
-    const res = storageService.sendTransfer({
-      assetCodes: codes,
-      toSite: selectedToSite,
-      sentBy: currentUser.username,
-      userSiteAccess: currentUser.siteAccess,
-      note: transferNote,
-    });
+    setIsSending(true);
+    try {
+      const res = await storageService.sendTransfer({
+        assetCodes: codes,
+        toSite: selectedToSite,
+        sentBy: currentUser.username,
+        userSiteAccess: currentUser.siteAccess,
+        vehicleNo,
+        driverName,
+        note: transferNote,
+      });
 
-    if (res.success) {
-      soundService.playSuccess();
-      setFeedback({ type: 'success', message: res.message });
-      setSendAssetCodesInput('');
-      setTransferNote('');
-      setActiveTab('outbound');
-    } else {
+      if (res.success) {
+        soundService.playSuccess();
+        setFeedback({ type: 'success', message: res.message });
+        setSendAssetCodesInput('');
+        setVehicleNo('');
+        setDriverName('');
+        setTransferNote('');
+        setActiveTab('outbound');
+      } else {
+        soundService.playError();
+        setFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: res.message });
+      setFeedback({ type: 'error', message: err.message || 'Gagal mengirim transfer.' });
+    } finally {
+      setIsSending(false);
     }
   };
 
   // Handle Receive Transfer (Step 2)
-  const handleConfirmReceive = () => {
-    if (!receivingTransfer || !receiveTargetLocationId || !currentUser) return;
+  const handleConfirmReceive = async () => {
+    if (!receivingTransfer || !receiveTargetLocationId || !currentUser || isReceiving) return;
 
-    const res = storageService.receiveTransfer({
-      transferId: receivingTransfer.transferId,
-      toLocationId: receiveTargetLocationId,
-      receivedBy: currentUser.username,
-      userSiteAccess: currentUser.siteAccess,
-    });
+    setIsReceiving(true);
+    try {
+      const res = await storageService.receiveTransfer({
+        transferId: receivingTransfer.transferId,
+        toLocationId: receiveTargetLocationId,
+        receivedBy: currentUser.username,
+        userSiteAccess: currentUser.siteAccess,
+      });
 
-    if (res.success) {
-      soundService.playSuccess();
-      setFeedback({ type: 'success', message: res.message });
-      setReceivingTransfer(null);
-      setReceiveTargetLocationId('');
-    } else {
+      if (res.success) {
+        soundService.playSuccess();
+        setFeedback({ type: 'success', message: res.message });
+        setReceivingTransfer(null);
+        setReceiveTargetLocationId('');
+      } else {
+        soundService.playError();
+        setFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: res.message });
+      setFeedback({ type: 'error', message: err.message || 'Gagal menerima transfer.' });
+    } finally {
+      setIsReceiving(false);
     }
   };
 
   // Handle Cancel Transfer
-  const handleCancelTransfer = (transferId: string) => {
-    if (!currentUser) return;
-    const res = storageService.cancelTransfer(transferId, currentUser.username, currentUser.siteAccess);
-    if (res.success) {
-      soundService.playSuccess();
-      setFeedback({ type: 'success', message: res.message });
-    } else {
+  const handleCancelTransfer = async (transferId: string) => {
+    if (!currentUser || cancellingId) return;
+    setCancellingId(transferId);
+    try {
+      const res = await storageService.cancelTransfer(transferId, currentUser.username, currentUser.siteAccess);
+      if (res.success) {
+        soundService.playSuccess();
+        setFeedback({ type: 'success', message: res.message });
+      } else {
+        soundService.playError();
+        setFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: res.message });
+      setFeedback({ type: 'error', message: err.message || 'Gagal membatalkan transfer.' });
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -328,10 +361,11 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 {t.status === 'IN_TRANSIT' && (
                   <button
                     onClick={() => handleCancelTransfer(t.transferId)}
-                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto transition-colors"
+                    disabled={cancellingId === t.transferId}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto transition-colors"
                   >
                     <XCircle className="w-3.5 h-3.5" />
-                    <span>{getTranslation('cancel_transfer', language)}</span>
+                    <span>{cancellingId === t.transferId ? 'Membatalkan...' : getTranslation('cancel_transfer', language)}</span>
                   </button>
                 )}
               </div>
@@ -375,6 +409,34 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
               </select>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nomor Kendaraan / Truk (Opsional):
+                </label>
+                <input
+                  type="text"
+                  value={vehicleNo}
+                  onChange={(e) => setVehicleNo(e.target.value)}
+                  placeholder="Contoh: B 1234 XYZ"
+                  className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-900 focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nama Sopir (Opsional):
+                </label>
+                <input
+                  type="text"
+                  value={driverName}
+                  onChange={(e) => setDriverName(e.target.value)}
+                  placeholder="Contoh: Pak Joko"
+                  className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-900 focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
                 Catatan / Alasan Transfer (Opsional):
@@ -390,10 +452,11 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-extrabold shadow-sm flex items-center justify-center gap-2 transition-transform active:scale-95"
+              disabled={isSending}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-sm font-extrabold shadow-sm flex items-center justify-center gap-2 transition-transform active:scale-95"
             >
               <Send className="w-4 h-4" />
-              <span>Kirim Mesin (Kunci Status In Transit)</span>
+              <span>{isSending ? 'Sedang Mengirim ke Server...' : 'Kirim Mesin (Kunci Status In Transit)'}</span>
             </button>
           </form>
         </div>
@@ -438,16 +501,17 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setReceivingTransfer(null)}
-                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+                disabled={isReceiving}
+                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
               >
                 Batal
               </button>
               <button
                 onClick={handleConfirmReceive}
-                disabled={!receiveTargetLocationId}
+                disabled={!receiveTargetLocationId || isReceiving}
                 className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold disabled:opacity-50 transition-colors"
               >
-                Konfirmasi Diterima
+                {isReceiving ? 'Menyimpan di Server...' : 'Konfirmasi Diterima'}
               </button>
             </div>
           </div>

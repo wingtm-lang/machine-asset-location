@@ -190,7 +190,6 @@ export const INITIAL_SETTINGS: AppSettings = {
   rackSlotCapacity: 3,
   companyName: 'PT.WINNERS',
   spreadsheetId: '1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio',
-  gasWebAppUrl: 'https://script.google.com/macros/s/AKfycbwEAUtA4OH5MT2uAdVgQ4rSaJ-747ETBvyjDFn_oPp9RsmzKl0AG4k4ZRxeh90TyAzZ/exec',
   themePreset: 'sky_cyan',
   layoutStyle: 'sidebar',
   accentColor: 'emerald',

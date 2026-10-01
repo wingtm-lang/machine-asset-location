@@ -16,6 +16,7 @@ export const defaultTranslations: Translations = {
   home: { id: 'Beranda', en: 'Home' },
   dashboard: { id: 'Dashboard', en: 'Dashboard' },
   machines: { id: 'Daftar Mesin', en: 'Machines' },
+  rackmap: { id: 'Mapping Rak WH2', en: 'WH2 Rack Map' },
   move: { id: 'Pindah Lokasi', en: 'Move Location' },
   transfers: { id: 'Transfer Antar Site', en: 'Inter-Site Transfer' },
   opname: { id: 'Opname Mingguan', en: 'Weekly Opname' },

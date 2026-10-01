@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Clock,
   RotateCcw,
+  Grid,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
@@ -74,12 +75,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Site breakdown counts
   const siteCounts = useMemo(() => {
     const map: Record<string, number> = { PW1: 0, PW2: 0, PW3: 0, WH2: 0, SW: 0, QA: 0 };
-    for (const m of machines) {
+    for (const m of accessibleMachines) {
       if (map[m.siteId] !== undefined) map[m.siteId]++;
       else map[m.siteId] = 1;
     }
     return map;
-  }, [machines]);
+  }, [accessibleMachines]);
 
   // Machine Types / Standard Name Breakdown
   const machineTypeCounts = useMemo(() => {
@@ -171,6 +172,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span>{getTranslation('move', language)}</span>
               </button>
             )}
+
+            <button
+              onClick={() => onNavigateTab('rackmap')}
+              className="px-4 py-2.5 bg-teal-950/70 hover:bg-teal-900 text-teal-100 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-teal-400/30"
+              title="Buka Denah & Mapping Posisi Mesin di Rak Gudang WH2"
+            >
+              <Grid className="w-4 h-4 text-teal-300" />
+              <span>Mapping Rak WH2</span>
+            </button>
 
             {canPerformAction('OPNAME') && (
               <button
@@ -337,7 +347,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             return (
               <button
                 key={site.siteId}
-                onClick={() => onNavigateTab('machines')}
+                onClick={() => onNavigateTab(site.siteId === 'WH2' ? 'rackmap' : 'machines')}
                 className={`p-4 rounded-2xl border text-left transition-all hover:scale-[1.02] shadow-xs ${
                   hasAccess
                     ? 'bg-white border-slate-200/90 hover:border-emerald-500 hover:bg-emerald-50/30'

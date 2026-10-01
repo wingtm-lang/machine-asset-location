@@ -32,6 +32,8 @@ export const OpnameView: React.FC<OpnameViewProps> = () => {
   const [activeSession, setActiveSession] = useState<OpnameSession | null>(null);
   const [scannedItems, setScannedItems] = useState<OpnameItem[]>([]);
   const [inputScanCode, setInputScanCode] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [relocatingCode, setRelocatingCode] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -53,8 +55,8 @@ export const OpnameView: React.FC<OpnameViewProps> = () => {
   }, [activeSession]);
 
   // Start new opname session
-  const handleStartSession = () => {
-    if (!currentUser || !selectedLocationId) return;
+  const handleStartSession = async () => {
+    if (!currentUser || !selectedLocationId || isSaving) return;
 
     const currentYear = new Date().getFullYear();
     const weekNum = 39; // ISO week sample
@@ -78,12 +80,16 @@ export const OpnameView: React.FC<OpnameViewProps> = () => {
 
     setActiveSession(session);
     setScannedItems([]);
-    storageService.saveOpnameSession(session, []);
     soundService.playSuccess();
+    try {
+      await storageService.saveOpnameSession(session, []);
+    } catch (e) {
+      console.warn('Gagal sinkron sesi awal ke server:', e);
+    }
   };
 
   // Process scanned code in Opname session (A5.4)
-  const handleProcessScan = (code: string) => {
+  const handleProcessScan = async (code: string) => {
     if (!activeSession || !currentUser) return;
     const clean = code.trim();
     if (!clean) return;
@@ -148,42 +154,70 @@ export const OpnameView: React.FC<OpnameViewProps> = () => {
     };
 
     setActiveSession(updatedSession);
-    storageService.saveOpnameSession(updatedSession, updatedItems);
+    try {
+      await storageService.saveOpnameSession(updatedSession, updatedItems);
+    } catch (e) {
+      console.warn('Gagal sinkron sesi ke server:', e);
+    }
   };
 
   // 1-Click Relocate Misplaced Machine to Current Location (A5.4)
-  const handleQuickMoveHere = (item: OpnameItem) => {
-    if (!activeSession || !currentUser) return;
-    const res = storageService.resolveOpnameMisplaced({
-      assetCode: item.assetCode,
-      targetLocationId: activeSession.locationId,
-      username: currentUser.username,
-      sessionId: activeSession.sessionId,
-    });
+  const handleQuickMoveHere = async (item: OpnameItem) => {
+    if (!activeSession || !currentUser || relocatingCode) return;
+    setRelocatingCode(item.assetCode);
+    try {
+      const res = await storageService.resolveOpnameMisplaced({
+        assetCode: item.assetCode,
+        targetLocationId: activeSession.locationId,
+        username: currentUser.username,
+        sessionId: activeSession.sessionId,
+      });
 
-    if (res.success) {
-      soundService.playSuccess();
-      // Update item result to MATCH
-      setScannedItems((prev) =>
-        prev.map((i) =>
-          i.assetCode === item.assetCode ? { ...i, result: 'MATCH', resolution: 'MOVED_HERE' } : i
-        )
-      );
+      if (res.success) {
+        soundService.playSuccess();
+        // Update item result to MATCH
+        setScannedItems((prev) =>
+          prev.map((i) =>
+            i.assetCode === item.assetCode ? { ...i, result: 'MATCH', resolution: 'MOVED_HERE' } : i
+          )
+        );
+      } else {
+        soundService.playError();
+        alert(res.message || 'Gagal memindahkan mesin di server.');
+      }
+    } catch (err: any) {
+      soundService.playError();
+      alert(err.message || 'Tidak dapat terhubung ke server.');
+    } finally {
+      setRelocatingCode(null);
     }
   };
 
   // Complete Opname Session
-  const handleFinishSession = () => {
-    if (!activeSession) return;
+  const handleFinishSession = async () => {
+    if (!activeSession || isSaving) return;
+    setIsSaving(true);
     const finished: OpnameSession = {
       ...activeSession,
       finishedAt: new Date().toISOString(),
       status: 'COMPLETED',
     };
-    storageService.saveOpnameSession(finished, scannedItems);
-    setActiveSession(null);
-    soundService.playSuccess();
-    alert('Sesi opname mingguan berhasil diselesaikan dan disimpan!');
+    try {
+      const res = await storageService.saveOpnameSession(finished, scannedItems);
+      if (res.success) {
+        setActiveSession(null);
+        soundService.playSuccess();
+        alert('Sesi opname mingguan berhasil diselesaikan dan disimpan!');
+      } else {
+        soundService.playError();
+        alert(res.message || 'Gagal menyimpan sesi opname di server.');
+      }
+    } catch (err: any) {
+      soundService.playError();
+      alert(err.message || 'Tidak dapat terhubung ke server.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Missing Machines List (Expected at location but not yet scanned as MATCH)
@@ -292,9 +326,10 @@ export const OpnameView: React.FC<OpnameViewProps> = () => {
 
               <button
                 onClick={handleFinishSession}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
+                disabled={isSaving}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
               >
-                Selesaikan & Simpan
+                {isSaving ? 'Menyimpan ke Server...' : 'Selesaikan & Simpan'}
               </button>
             </div>
 
@@ -402,10 +437,11 @@ export const OpnameView: React.FC<OpnameViewProps> = () => {
                   {item.result === 'MISPLACED_SAME_SITE' && (
                     <button
                       onClick={() => handleQuickMoveHere(item)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto shadow-xs"
+                      disabled={relocatingCode === item.assetCode}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto shadow-xs"
                     >
                       <ArrowRight className="w-3.5 h-3.5" />
-                      <span>{getTranslation('move_to_this_location', language)}</span>
+                      <span>{relocatingCode === item.assetCode ? 'Memindahkan...' : getTranslation('move_to_this_location', language)}</span>
                     </button>
                   )}
                 </div>

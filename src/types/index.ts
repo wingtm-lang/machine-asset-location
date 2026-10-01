@@ -140,18 +140,25 @@ export interface OpnameItem {
   resolution?: string; // e.g. 'MOVED_HERE', 'REPORTED', 'IGNORED'
 }
 
-export type UserRole = 'Admin' | 'Mechanic' | 'Production Support' | 'Viewer';
+export type AuthorityRole = 'admin master' | 'all sites' | 'PW1' | 'PW2' | 'PW3' | string;
+
+export type UserRole = 'Admin' | 'Mechanic' | 'Production Support' | 'Viewer' | AuthorityRole;
 
 export interface User {
-  username: string;
-  displayName: string;
+  username: string; // NIK
+  displayName: string; // Nama
   role: UserRole;
-  siteAccess: string[]; // ['ALL'] or ['PW1', 'PW2'] or ['WH2', 'SW', 'QA']
-  language: 'id' | 'en';
-  active: boolean;
+  siteAccess: string[]; // e.g. ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA']
+  canAddUser?: boolean;
+  canUseRackMap?: boolean;
+  nik?: string;
+  profile?: string;
+  authority?: AuthorityRole;
+  language?: 'id' | 'en';
+  active?: boolean;
   passwordHash?: string;
   salt?: string;
-  failedAttempts: number;
+  failedAttempts?: number;
   lockedUntil?: string; // ISO date or null
   mustChangePassword?: boolean;
   lastLogin?: string;
@@ -202,7 +209,6 @@ export interface AppSettings {
   rackSlotCapacity: number; // 3
   companyName: string; // 'PT.WINNERS'
   spreadsheetId?: string; // Google Spreadsheet ID
-  gasWebAppUrl?: string; // Google Apps Script Web App Deployment URL
   themePreset?: ThemePreset; // 'sage_emerald' (default), 'dark_slate', etc.
   layoutStyle?: NavLayoutStyle; // 'sidebar' (default), 'topbar'
   accentColor?: AccentColor; // 'emerald'

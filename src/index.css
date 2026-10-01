@@ -1,5 +1,54 @@
 @import "tailwindcss";
 
+:root {
+  --bg: #edf3fa;
+  --card: #ffffff;
+  --tx: #0c2e57;
+  --mut: #5d6f88;
+  --bd: #cfd8e6;
+  --empty: #dfe7f2;
+  --full: #0c2e57;
+  --res: #9cb1cb;
+  --rack: #e8f1fc;
+  --rackb: #2a5f9e;
+  --sel: #ffd23f;
+  --bp: #0c2e57;
+  --bp2: #0a2647;
+  --ln: #cfe6ff;
+  --ln2: #7fb2e8;
+  --acc: #ffd23f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #071930;
+    --card: #0d2444;
+    --tx: #e6eef9;
+    --mut: #8ea3c0;
+    --bd: #1e395f;
+    --empty: #102848;
+    --full: #ffd23f;
+    --res: #385982;
+    --rack: #0e2f57;
+    --rackb: #4075b5;
+    --sel: #ffd23f;
+  }
+}
+
+:root[data-theme="dark"], .dark {
+  --bg: #071930;
+  --card: #0d2444;
+  --tx: #e6eef9;
+  --mut: #8ea3c0;
+  --bd: #1e395f;
+  --empty: #102848;
+  --full: #ffd23f;
+  --res: #385982;
+  --rack: #0e2f57;
+  --rackb: #4075b5;
+  --sel: #ffd23f;
+}
+
 @layer base {
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
@@ -8,6 +57,79 @@
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
+}
+
+/* Asset Mapping Custom Layout Styles */
+.asset-map-canvas {
+  position: relative;
+  min-width: 620px;
+  aspect-ratio: 4 / 1;
+  background: var(--card);
+  border: 1px solid var(--bd);
+}
+
+.asset-rack-box {
+  position: absolute;
+  background: var(--rack);
+  border: 1.5px solid var(--rackb);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0;
+  color: var(--tx);
+  transition: all 0.15s ease-in-out;
+}
+
+.asset-rack-box:hover {
+  filter: brightness(0.96);
+  transform: translateY(-1px);
+}
+
+.asset-rack-box.on {
+  outline: 3px solid var(--sel);
+  z-index: 2;
+}
+
+.asset-col-cell {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 3px;
+  background: var(--empty);
+  border: 0;
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  transition: transform 0.1s ease-in-out;
+}
+
+.asset-col-cell:hover {
+  transform: scale(1.15);
+  z-index: 10;
+}
+
+.asset-col-cell.selected {
+  outline: 2px solid var(--sel);
+  outline-offset: 1px;
+}
+
+.asset-slot-bar {
+  flex: 1;
+  border-radius: 1px;
+  background: var(--card);
+  opacity: 0.55;
+}
+
+.asset-slot-bar.filled {
+  background: var(--full);
+  opacity: 1;
 }
 
 /* Custom styles for animations and smooth UI */

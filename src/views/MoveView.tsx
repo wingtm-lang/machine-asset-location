@@ -47,6 +47,8 @@ export const MoveView: React.FC<MoveViewProps> = ({
   const [loanDueDate, setLoanDueDate] = useState<string>('');
   const [reason, setReason] = useState<string>('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [undoingAsset, setUndoingAsset] = useState<string | null>(null);
 
   // Available locations for current site
   const availableLocations = useMemo(() => {
@@ -75,7 +77,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
     };
   }, [selectedTargetLoc]);
 
-  const handleExecuteMove = (e: React.FormEvent) => {
+  const handleExecuteMove = async (e: React.FormEvent) => {
     e.preventDefault();
     setFeedback(null);
 
@@ -91,68 +93,84 @@ export const MoveView: React.FC<MoveViewProps> = ({
       return;
     }
 
-    if (!currentUser) return;
+    if (!currentUser || isSubmitting) return;
 
     if (selectedStatus === 'LOANED' && (!loanTo.trim() || !loanDueDate.trim())) {
       setFeedback({ type: 'error', message: 'Status LOANED wajib mengisi peminjam (Loan To) dan batas waktu (Due Date).' });
       return;
     }
 
+    setIsSubmitting(true);
     let successCount = 0;
     let lastError = '';
 
-    for (const m of machinesToMove) {
-      const res = storageService.moveMachine({
-        assetCode: m.assetCode,
-        targetLocationId: effectiveTargetLoc,
-        username: currentUser.username,
-        userSiteAccess: currentUser.siteAccess,
-        reason,
-        newStatus: selectedStatus !== 'KEEP' ? selectedStatus : undefined,
-        loanTo: selectedStatus === 'LOANED' ? loanTo : undefined,
-        loanDueDate: selectedStatus === 'LOANED' ? loanDueDate : undefined,
-      });
+    try {
+      for (const m of machinesToMove) {
+        const res = await storageService.moveMachine({
+          assetCode: m.assetCode,
+          targetLocationId: effectiveTargetLoc,
+          username: currentUser.username,
+          userSiteAccess: currentUser.siteAccess,
+          reason,
+          newStatus: selectedStatus !== 'KEEP' ? selectedStatus : undefined,
+          loanTo: selectedStatus === 'LOANED' ? loanTo : undefined,
+          loanDueDate: selectedStatus === 'LOANED' ? loanDueDate : undefined,
+        });
 
-      if (res.success) {
-        successCount++;
-      } else {
-        lastError = res.message;
+        if (res.success) {
+          successCount++;
+        } else {
+          lastError = res.message;
+        }
       }
-    }
 
-    if (successCount > 0) {
-      soundService.playSuccess();
-      setFeedback({
-        type: 'success',
-        message: selectedStatus === 'SOLD'
-          ? `Sukses memperbarui ${successCount} mesin menjadi status SOLD (Terjual/Keluar Pabrik)!`
-          : `Sukses memindahkan ${successCount} mesin ke ${effectiveTargetLoc}!`,
-      });
-      refreshMovements();
-      setTimeout(() => {
-        onSuccessDone();
-      }, 1200);
-    } else {
+      if (successCount > 0) {
+        soundService.playSuccess();
+        setFeedback({
+          type: 'success',
+          message: selectedStatus === 'SOLD'
+            ? `Sukses memperbarui ${successCount} mesin menjadi status SOLD (Terjual/Keluar Pabrik)!`
+            : `Sukses memindahkan ${successCount} mesin ke ${effectiveTargetLoc}!`,
+        });
+        refreshMovements();
+        setTimeout(() => {
+          onSuccessDone();
+        }, 1200);
+      } else {
+        soundService.playError();
+        setFeedback({ type: 'error', message: lastError || 'Gagal memindahkan mesin.' });
+      }
+    } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: lastError || 'Gagal memindahkan mesin.' });
+      setFeedback({ type: 'error', message: err.message || 'Terjadi kesalahan sistem.' });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleUndo = (assetCode: string) => {
-    if (!currentUser) return;
-    const res = storageService.undoLastMove({
-      assetCode,
-      username: currentUser.username,
-      isAdmin: currentUser.role === 'Admin',
-    });
+  const handleUndo = async (assetCode: string) => {
+    if (!currentUser || undoingAsset) return;
+    setUndoingAsset(assetCode);
+    try {
+      const res = await storageService.undoLastMove({
+        assetCode,
+        username: currentUser.username,
+        isAdmin: currentUser.role === 'Admin',
+      });
 
-    if (res.success) {
-      soundService.playSuccess();
-      setFeedback({ type: 'success', message: res.message });
-      refreshMovements();
-    } else {
+      if (res.success) {
+        soundService.playSuccess();
+        setFeedback({ type: 'success', message: res.message });
+        refreshMovements();
+      } else {
+        soundService.playError();
+        setFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: res.message });
+      setFeedback({ type: 'error', message: err.message || 'Gagal membatalkan pemindahan.' });
+    } finally {
+      setUndoingAsset(null);
     }
   };
 
@@ -382,7 +400,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={!hasAccess || machinesToMove.length === 0 || (selectedStatus !== 'SOLD' && (slotOccupancy?.isFull ?? false))}
+            disabled={isSubmitting || !hasAccess || machinesToMove.length === 0 || (selectedStatus !== 'SOLD' && (slotOccupancy?.isFull ?? false))}
             className={`w-full py-3 text-white rounded-xl text-sm font-extrabold shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 transition-all hover:scale-[1.01] ${
               selectedStatus === 'SOLD'
                 ? 'bg-emerald-600 hover:bg-emerald-500'
@@ -391,7 +409,9 @@ export const MoveView: React.FC<MoveViewProps> = ({
           >
             <Layers className="w-4 h-4" />
             <span>
-              {selectedStatus === 'SOLD'
+              {isSubmitting
+                ? 'Sedang Menyimpan ke Server...'
+                : selectedStatus === 'SOLD'
                 ? `Konfirmasi Status SOLD (${machinesToMove.length} Mesin)`
                 : `Simpan Pemindahan (${machinesToMove.length} Mesin)`}
             </span>
@@ -442,10 +462,11 @@ export const MoveView: React.FC<MoveViewProps> = ({
                 <button
                   type="button"
                   onClick={() => handleUndo(mov.assetCode)}
-                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto transition-colors"
+                  disabled={undoingAsset === mov.assetCode}
+                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 disabled:opacity-50 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Undo Pemindahan</span>
+                  <span>{undoingAsset === mov.assetCode ? 'Membatalkan...' : 'Undo Pemindahan'}</span>
                 </button>
               </div>
             ))}

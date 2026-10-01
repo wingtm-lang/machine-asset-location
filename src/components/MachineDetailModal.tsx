@@ -16,6 +16,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { Machine } from '../types';
+import { PtWinnersLogo } from './PtWinnersLogo';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
@@ -374,7 +375,10 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                 className="w-80 bg-white text-slate-950 rounded-2xl p-5 border-2 border-slate-300 shadow-xl flex flex-col items-center text-center space-y-3 print:border-black print:shadow-none"
               >
                 <div className="w-full flex items-center justify-between border-b pb-2 border-slate-200">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded bg-white flex items-center justify-center p-0.5 border border-slate-200 shrink-0 overflow-hidden">
+                      <PtWinnersLogo className="w-full h-full object-contain" />
+                    </div>
                     <span className="font-black text-sm tracking-wider text-emerald-700">PT.WINNERS</span>
                     <span className="text-[10px] font-bold text-slate-400">• TAG 2D QR</span>
                   </div>

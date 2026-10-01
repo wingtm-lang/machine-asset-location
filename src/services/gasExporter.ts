@@ -1,41 +1,23 @@
 /**
  * Google Apps Script (Code.gs) Generator & Exporter
- * Comprehensive production backend script for Google Apps Script + Google Sheets.
- * Diselaraskan secara presisi dengan struktur tabel sheet 'machine_asset' PT.WINNERS:
- * Serial, Manufacturer, Model, Status, Location ID, Site ID, Pending Transfer ID, Last Moved At, Last Moved By, dll.
+ * Standalone & Container-bound Code.gs for PT.WINNERS Machine Asset Location Tracker.
  */
 
 export function generateGasCodeGs(spreadsheetId: string = '1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio'): string {
   return `/**
  * ============================================================================
  * PT.WINNERS MACHINE ASSET LOCATION TRACKER - BACKEND CODE.gs
- * Platform: Google Apps Script + Google Sheets (Standalone / Container-bound)
- * Target Spreadsheet ID: ${spreadsheetId}
+ * Target: Google Spreadsheet PT.WINNERS
  * 
  * FITUR UTAMA & KESELARASAN STRUKTUR TABEL:
- * 1. Menulis langsung mutasi lokasi ke kolom "Location ID", "Site ID", "Status",
+ * 1. Menulis langsung mutasi ke kolom "Location ID", "Site ID", "Status",
  *    "Last Moved At", "Last Moved By", "Pending Transfer ID" pada sheet 'machine_asset'.
- * 2. Mencatat setiap riwayat pemindahan & perubahan ke sheet 'Movement_History' secara otomatis.
+ * 2. Mencatat setiap riwayat pemindahan ke sheet 'Movement_History' secara otomatis.
  * 3. Mendukung fitur Undo Pemindahan (mengembalikan lokasi awal di sheet & menandai log).
- * 4. Mendukung alur Transfer Antar Site 2-Langkah (Kirim -> In Transit -> Terima di sheet tujuan).
+ * 4. Mendukung alur Transfer Antar Site (Kirim -> In Transit -> Terima di sheet tujuan).
  * 5. Mendukung rekonsiliasi Stok Opname & pembaruan kolom "Last Opname At".
  * 6. Deteksi kolom dinamis: Script otomatis mencari indeks kolom berdasarkan nama header
- *    tanpa peduli urutan kolom, dan otomatis membuat kolom tracking jika belum ada.
- * 
- * PANDUAN PEMASANGAN (DEPLOYMENT) DI GOOGLE SPREADSHEET:
- * 1. Buka Google Spreadsheet data mesin PT.WINNERS di browser.
- * 2. Klik menu "Ekstensi" (Extensions) > "Apps Script".
- * 3. Hapus seluruh kode lama di "Code.gs", lalu tempelkan (Paste) seluruh kode ini.
- * 4. Klik ikon Save (Simpan).
- * 5. Klik tombol biru "Terapkan" (Deploy) di kanan atas > "Penerapan baru" (New deployment).
- * 6. Pilih jenis penerapan: "Aplikasi web" (Web app).
- * 7. Isi Konfigurasi:
- *    - Deskripsi: PT.WINNERS Tracker Backend v2
- *    - Jalankan sebagai (Execute as): Akun saya (Me)
- *    - Siapa yang memiliki akses (Who has access): Siapa saja (Anyone) -> WAJIB agar aplikasi web dapat terhubung!
- * 8. Klik "Terapkan" (Deploy) dan berikan izin akses (Authorize access).
- * 9. Salin "URL Aplikasi Web" (Web App URL yang berakhiran /exec).
- * 10. Tempelkan URL tersebut ke aplikasi web PT.WINNERS pada menu Admin > Google Spreadsheet & Apps Script Backend.
+ *    tanpa terpengaruh urutan kolom, dan otomatis membuat kolom tracking jika belum ada.
  * ============================================================================
  */
 
@@ -43,9 +25,6 @@ var SPREADSHEET_ID = "${spreadsheetId}";
 var PEPPER = "PT_WINNERS_APP_SECRET_PEPPER_2026";
 var SESSION_TTL_HOURS = 12;
 
-/**
- * Mendapatkan instance Spreadsheet (aktif maupun standalone via ID)
- */
 function getSpreadsheet() {
   try {
     var active = SpreadsheetApp.getActiveSpreadsheet();
@@ -54,10 +33,6 @@ function getSpreadsheet() {
   return SpreadsheetApp.openById(SPREADSHEET_ID);
 }
 
-/**
- * Mencari tab sheet data mesin utama
- * Mendukung 'machine_asset', 'machine_assets', 'Machine_Asset', 'Machines', dll.
- */
 function getMachineAssetSheet(ss) {
   var candidates = ['machine_asset', 'machine_assets', 'Machine_Asset', 'Machines', 'machines', 'Sheet1'];
   for (var i = 0; i < candidates.length; i++) {
@@ -67,9 +42,6 @@ function getMachineAssetSheet(ss) {
   return ss.getSheets()[0];
 }
 
-/**
- * Web App Entrypoint (HTTP GET)
- */
 function doGet(e) {
   if (e && e.parameter && e.parameter.action) {
     var token = e.parameter.token || '';
@@ -93,7 +65,6 @@ function doGet(e) {
     '<div style="font-family:sans-serif;padding:30px;line-height:1.6;color:#1e293b;">' +
     '<h2>PT.WINNERS Machine Asset Location Tracker - Backend Online</h2>' +
     '<p>Status: <b>OK (Connected)</b></p>' +
-    '<p>Spreadsheet ID: <code>' + SPREADSHEET_ID + '</code></p>' +
     '<p>Waktu Server: ' + new Date().toString() + '</p>' +
     '<hr>' +
     '<p style="font-size:12px;color:#64748b;">Endpoint ini melayani sinkronisasi data mesin, pemindahan lokasi, transfer antar site, dan audit stok opname.</p>' +
@@ -101,9 +72,6 @@ function doGet(e) {
   ).setTitle('PT.WINNERS Tracker API').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-/**
- * Web App Entrypoint (HTTP POST)
- */
 function doPost(e) {
   try {
     var payload = {};
@@ -129,79 +97,6 @@ function doPost(e) {
   }
 }
 
-/**
- * UNIVERSAL AUTHORIZATION GATE
- */
-function authorize(token, action, params) {
-  var user = null;
-  // Jika dipanggil dari integrasi internal / direct sync
-  if (token) {
-    user = validateSession(token);
-  }
-  if (!user) {
-    user = {
-      username: (params && (params.username || params.byUser || params.sentBy || params.receivedBy || params.lastMovedBy)) || 'System',
-      role: 'Admin',
-      siteAccess: ['ALL']
-    };
-  }
-
-  // Gunakan ScriptLock untuk mencegah race condition mutasi data
-  var lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(15000); // Tunggu antrian maksimal 15 detik
-
-    switch (action) {
-      case 'LOGIN':
-        return handleLogin(params.username, params.password);
-
-      case 'GET_INITIAL_DATA':
-      case 'GET_MACHINES':
-        return handleGetInitialData(user);
-
-      case 'SEARCH_MACHINE':
-        return handleSearchMachine(user, params.query);
-
-      case 'MOVE_MACHINE':
-      case 'UPDATE_MACHINE':
-        return handleMoveMachine(user, params);
-
-      case 'UNDO_MOVE':
-        return handleUndoMove(user, params);
-
-      case 'SEND_TRANSFER':
-        return handleSendTransfer(user, params);
-
-      case 'RECEIVE_TRANSFER':
-        return handleReceiveTransfer(user, params);
-
-      case 'CANCEL_TRANSFER':
-        return handleCancelTransfer(user, params);
-
-      case 'SAVE_OPNAME':
-        return handleSaveOpname(user, params);
-
-      case 'ADMIN_AUDIT_FIX':
-        return handleAdminAuditFix(user);
-
-      case 'PING':
-        return { success: true, message: 'Koneksi ke Google Apps Script berhasil', timestamp: new Date().toISOString() };
-
-      default:
-        return { success: false, message: 'Aksi tidak dikenal: ' + action };
-    }
-  } catch (err) {
-    return { success: false, message: 'Server Lock/Timeout Error: ' + err.toString() };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-/**
- * MENDAPATKAN PETA INDEKS KOLOM DINAMIS DARI SHEET 'machine_asset'
- * Mendeteksi otomatis: Serial, Manufacturer, Model, Status, Location ID, Site ID,
- * Pending Transfer ID, Last Moved At, Last Moved By, Asset Code, Barcode, dll.
- */
 function getSheetColumnIndices(sheet) {
   var data = sheet.getDataRange().getValues();
   if (!data || data.length === 0) return { colMap: {}, headers: [], rowCount: 0 };
@@ -256,11 +151,6 @@ function getSheetColumnIndices(sheet) {
   return indices;
 }
 
-/**
- * MEMASTIKAN KOLOM TRACKING TERSEDIA DI ROW 1
- * Jika sheet belum memiliki kolom Status, Location ID, Site ID, Pending Transfer ID,
- * Last Moved At, atau Last Moved By, fungsi ini otomatis menambahkannya ke header.
- */
 function ensureTrackingColumns(sheet, indices) {
   var headers = indices.headers.slice();
   var added = false;
@@ -293,10 +183,6 @@ function ensureTrackingColumns(sheet, indices) {
   return indices;
 }
 
-/**
- * PENCARIAN BARIS MESIN DI DALAM TABEL DATA
- * Mencocokkan berdasarkan Asset Code, Barcode, atau Serial Number
- */
 function findMachineRow(data, indices, targetAsset, targetBarcode, targetSerial) {
   var qAsset = String(targetAsset || '').trim().toUpperCase();
   var qBarcode = String(targetBarcode || '').trim();
@@ -317,16 +203,10 @@ function findMachineRow(data, indices, targetAsset, targetBarcode, targetSerial)
   return -1;
 }
 
-/**
- * FORMAT TANGGAL DAN WAKTU INDONESIA (GMT+7)
- */
 function formatCurrentDateTime() {
   return Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd HH:mm:ss");
 }
 
-/**
- * 1. PENGAMBILAN DATA AWAL (READ SHEET 'machine_asset')
- */
 function handleGetInitialData(user) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -407,9 +287,6 @@ function handleGetInitialData(user) {
   };
 }
 
-/**
- * 2. PERPINDAHAN MESIN & PERUBAHAN STATUS TERTANAM KE SHEET (MOVE_MACHINE / UPDATE_MACHINE)
- */
 function handleMoveMachine(user, params) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -434,7 +311,6 @@ function handleMoveMachine(user, params) {
     targetLoc = targetLoc || 'SOLD';
   }
 
-  // Cari baris mesin di sheet
   var rowIndex = findMachineRow(data, indices, targetAsset, targetBarcode, targetSerial);
   if (rowIndex === -1) {
     return { success: false, message: 'Mesin ' + (targetAsset || targetBarcode) + ' tidak ditemukan di sheet' };
@@ -446,7 +322,6 @@ function handleMoveMachine(user, params) {
   var currentSerial = indices.serial !== -1 ? String(currentRow[indices.serial] || '') : targetSerial;
   var currentName = indices.standardMachineName !== -1 ? String(currentRow[indices.standardMachineName] || '') : 'Sewing Machine';
 
-  // 1. Tanamkan perubahan ke sel baris mesin di tab sheet 'machine_asset'
   if (targetLoc && indices.locationId !== -1) {
     mSheet.getRange(rowIndex, indices.locationId + 1).setValue(targetLoc);
   }
@@ -463,10 +338,9 @@ function handleMoveMachine(user, params) {
     mSheet.getRange(rowIndex, indices.lastMovedBy + 1).setValue(username);
   }
   if (indices.pendingTransferId !== -1) {
-    mSheet.getRange(rowIndex, indices.pendingTransferId + 1).setValue(''); // Clear pending transfer on direct move
+    mSheet.getRange(rowIndex, indices.pendingTransferId + 1).setValue('');
   }
 
-  // 2. Tanamkan catatan ke tab sheet 'Movement_History' (Audit Log)
   var hSheet = getOrCreateMovementHistorySheet(ss);
   hSheet.appendRow([
     historyId,
@@ -483,7 +357,7 @@ function handleMoveMachine(user, params) {
     username,
     timestampStr,
     params.reason || '',
-    false // isUndone
+    false
   ]);
 
   return {
@@ -497,9 +371,6 @@ function handleMoveMachine(user, params) {
   };
 }
 
-/**
- * 3. BATALKAN PEMINDAHAN TERAKHIR / UNDO MOVE (TERTANAM KE SHEET)
- */
 function handleUndoMove(user, params) {
   var ss = getSpreadsheet();
   var hSheet = ss.getSheetByName('Movement_History');
@@ -514,7 +385,6 @@ function handleUndoMove(user, params) {
   var hData = hSheet.getDataRange().getValues();
   if (hData.length <= 1) return { success: false, message: 'Belum ada riwayat pemindahan' };
 
-  // Cari mutasi terakhir untuk mesin tersebut
   var targetHRow = -1;
   for (var i = hData.length - 1; i >= 1; i--) {
     var hRow = hData[i];
@@ -542,10 +412,9 @@ function handleUndoMove(user, params) {
   var record = hData[targetHRow - 1];
   var originalBarcode = record[1];
   var originalAsset = record[2];
-  var originalLoc = record[5];  // FromLocation
-  var originalSite = record[7]; // FromSite
+  var originalLoc = record[5];
+  var originalSite = record[7];
 
-  // Kembalikan lokasi di sheet 'machine_asset'
   var indices = getSheetColumnIndices(mSheet);
   var mData = mSheet.getDataRange().getValues();
   var mRow = findMachineRow(mData, indices, originalAsset, originalBarcode, '');
@@ -559,7 +428,6 @@ function handleUndoMove(user, params) {
     if (indices.lastMovedBy !== -1) mSheet.getRange(mRow, indices.lastMovedBy + 1).setValue(username + ' (UNDO)');
   }
 
-  // Tandai isUndone = true di sheet Movement_History
   hSheet.getRange(targetHRow, 15).setValue(true);
 
   return {
@@ -568,9 +436,6 @@ function handleUndoMove(user, params) {
   };
 }
 
-/**
- * 4. TRANSFER ANTAR SITE: KIRIM (SEND_TRANSFER)
- */
 function handleSendTransfer(user, params) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -600,14 +465,12 @@ function handleSendTransfer(user, params) {
       var fromLoc = indices.locationId !== -1 ? String(row[indices.locationId] || '') : 'PW1';
       var fromSite = indices.siteId !== -1 ? String(row[indices.siteId] || '') : 'PW1';
 
-      // Update machine_asset
       if (indices.locationId !== -1) mSheet.getRange(mRow, indices.locationId + 1).setValue(toSite + '-IN_TRANSIT');
       if (indices.status !== -1) mSheet.getRange(mRow, indices.status + 1).setValue('IN_TRANSIT');
       if (indices.pendingTransferId !== -1) mSheet.getRange(mRow, indices.pendingTransferId + 1).setValue(transferId);
       if (indices.lastMovedAt !== -1) mSheet.getRange(mRow, indices.lastMovedAt + 1).setValue(timestampStr);
       if (indices.lastMovedBy !== -1) mSheet.getRange(mRow, indices.lastMovedBy + 1).setValue(sentBy);
 
-      // Log to Movement_History
       hSheet.appendRow([
         "MOV-" + Date.now() + "-" + (i + 1),
         indices.barcode !== -1 ? row[indices.barcode] : target,
@@ -630,7 +493,6 @@ function handleSendTransfer(user, params) {
     }
   }
 
-  // Append to Transfer_Orders sheet
   tSheet.appendRow([
     transferId,
     JSON.stringify(targetList),
@@ -641,9 +503,9 @@ function handleSendTransfer(user, params) {
     params.driverName || '-',
     note,
     sentBy,
-    '', // receivedBy
+    '',
     timestampStr,
-    ''  // receivedAt
+    ''
   ]);
 
   return {
@@ -654,9 +516,6 @@ function handleSendTransfer(user, params) {
   };
 }
 
-/**
- * 5. TRANSFER ANTAR SITE: TERIMA (RECEIVE_TRANSFER)
- */
 function handleReceiveTransfer(user, params) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -674,12 +533,10 @@ function handleReceiveTransfer(user, params) {
   var mData = mSheet.getDataRange().getValues();
 
   var tData = tSheet.getDataRange().getValues();
-  var foundTransfer = false;
   var machineList = [];
 
   for (var t = 1; t < tData.length; t++) {
     if (String(tData[t][0]) === String(transferId)) {
-      foundTransfer = true;
       if (!toSite) toSite = tData[t][3];
       try {
         machineList = JSON.parse(tData[t][1]);
@@ -687,7 +544,6 @@ function handleReceiveTransfer(user, params) {
         machineList = [tData[t][1]];
       }
 
-      // Update Transfer_Orders row
       tSheet.getRange(t + 1, 5).setValue('RECEIVED');
       tSheet.getRange(t + 1, 10).setValue(receivedBy);
       tSheet.getRange(t + 1, 12).setValue(timestampStr);
@@ -695,7 +551,6 @@ function handleReceiveTransfer(user, params) {
     }
   }
 
-  // Jika dipanggil per-mesin
   if (params.assetCode && machineList.length === 0) {
     machineList = [params.assetCode];
   }
@@ -708,15 +563,13 @@ function handleReceiveTransfer(user, params) {
       var fromLoc = indices.locationId !== -1 ? String(row[indices.locationId] || '') : 'IN_TRANSIT';
       var fromSite = indices.siteId !== -1 ? String(row[indices.siteId] || '') : 'PW1';
 
-      // Update machine_asset
       if (indices.locationId !== -1) mSheet.getRange(mRow, indices.locationId + 1).setValue(toLocationId);
       if (indices.siteId !== -1 && toSite) mSheet.getRange(mRow, indices.siteId + 1).setValue(toSite);
       if (indices.status !== -1) mSheet.getRange(mRow, indices.status + 1).setValue('ACTIVE');
-      if (indices.pendingTransferId !== -1) mSheet.getRange(mRow, indices.pendingTransferId + 1).setValue(''); // clear pending
+      if (indices.pendingTransferId !== -1) mSheet.getRange(mRow, indices.pendingTransferId + 1).setValue('');
       if (indices.lastMovedAt !== -1) mSheet.getRange(mRow, indices.lastMovedAt + 1).setValue(timestampStr);
       if (indices.lastMovedBy !== -1) mSheet.getRange(mRow, indices.lastMovedBy + 1).setValue(receivedBy);
 
-      // Log Movement_History
       hSheet.appendRow([
         "MOV-" + Date.now() + "-" + (m + 1),
         indices.barcode !== -1 ? row[indices.barcode] : target,
@@ -743,9 +596,6 @@ function handleReceiveTransfer(user, params) {
   };
 }
 
-/**
- * 6. BATALKAN TRANSFER (CANCEL_TRANSFER)
- */
 function handleCancelTransfer(user, params) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -778,9 +628,6 @@ function handleCancelTransfer(user, params) {
   return { success: true, message: 'Transfer ' + transferId + ' berhasil dibatalkan' };
 }
 
-/**
- * 7. AUDIT STOK OPNAME (SAVE_OPNAME)
- */
 function handleSaveOpname(user, params) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -809,7 +656,6 @@ function handleSaveOpname(user, params) {
     JSON.stringify(items.slice(0, 100))
   ]);
 
-  // Update Last Opname At pada baris mesin yang berhasil dicocokkan (MATCH)
   if (mSheet) {
     var indices = getSheetColumnIndices(mSheet);
     if (indices.lastOpnameAt === -1) {
@@ -832,9 +678,6 @@ function handleSaveOpname(user, params) {
   return { success: true, message: 'Hasil audit stok opname berhasil disimpan' };
 }
 
-/**
- * 8. PENCARIAN MESIN CEPAT
- */
 function handleSearchMachine(user, query) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -863,9 +706,6 @@ function handleSearchMachine(user, query) {
   return { success: false, message: 'Mesin dengan kode ' + query + ' tidak ditemukan di sheet' };
 }
 
-/**
- * 9. PEMBERSIHAN DATA DAN AUDIT FORMAT OTOMATIS
- */
 function handleAdminAuditFix(user) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -895,51 +735,9 @@ function handleAdminAuditFix(user) {
   return { success: true, fixedCount: fixedCount, message: fixedCount + ' baris data berhasil diselaraskan formatnya.' };
 }
 
-/**
- * OTENTIKASI PENGGUNA
- */
-function handleLogin(username, password) {
-  if (!username || !password) return { success: false, message: 'Username dan password wajib diisi' };
-  var ss = getSpreadsheet();
-  var sheet = ss.getSheetByName('Users');
-  if (!sheet) {
-    initialSetupDatabase();
-    sheet = ss.getSheetByName('Users');
-  }
-
-  var data = sheet.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var uName = String(row[0]).trim().toLowerCase();
-    var dName = row[1];
-    var role = row[2];
-    var sites = String(row[3]).split(',').map(function(s) { return s.trim().toUpperCase(); });
-    var lang = row[4] || 'id';
-    var active = row[5];
-    var passHash = String(row[6]);
-    var salt = String(row[7] || "salt_default");
-
-    if (uName === String(username).trim().toLowerCase()) {
-      if (!active) return { success: false, message: 'Akun dinonaktifkan' };
-      var inputHash = computeSha256(password + salt + PEPPER);
-      if (password === 'winners123' || passHash === inputHash) {
-        var token = "TKN-" + Utilities.getUuid();
-        saveSession(token, uName, role, sites);
-        return {
-          success: true,
-          token: token,
-          user: { username: uName, displayName: dName, role: role, siteAccess: sites, language: lang }
-        };
-      } else {
-        return { success: false, message: 'Password salah' };
-      }
-    }
-  }
-  return { success: false, message: 'Pengguna tidak ditemukan' };
-}
-
 function computeSha256(input) {
-  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
+  if (input === null || typeof input === 'undefined') input = "";
+  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(input), Utilities.Charset.UTF_8);
   var out = "";
   for (var i = 0; i < raw.length; i++) {
     var byteVal = raw[i];
@@ -981,9 +779,6 @@ function validateSession(token) {
   return null;
 }
 
-/**
- * HELPER: MENDAPATKAN ATAU MEMBUAT SHEET TABEL PENDUKUNG
- */
 function getOrCreateMovementHistorySheet(ss) {
   var hSheet = ss.getSheetByName('Movement_History');
   if (!hSheet) {
@@ -1014,9 +809,6 @@ function getOrCreateTransferOrdersSheet(ss) {
   return tSheet;
 }
 
-/**
- * INISIALISASI STRUKTUR DATABASE MASTER (SHEETS LAIN TANPA MENIMPA machine_asset)
- */
 function initialSetupDatabase() {
   var ss = getSpreadsheet();
   var sheets = [
@@ -1039,16 +831,6 @@ function initialSetupDatabase() {
       sh.setFrozenRows(1);
     }
   });
-
-  // Tambah akun admin jika tabel user kosong
-  var userSh = ss.getSheetByName('Users');
-  if (userSh.getLastRow() === 1) {
-    var adminSalt = "salt_winners_2026";
-    var adminHash = computeSha256("winners123" + adminSalt + PEPPER);
-    userSh.appendRow(['admin', 'Super Administrator', 'Admin', 'ALL', 'id', true, adminHash, adminSalt, '']);
-    userSh.appendRow(['mechanic_pw1', 'Mechanic PW1', 'Mechanic', 'PW1', 'id', true, adminHash, adminSalt, '']);
-    userSh.appendRow(['mechanic_wh2', 'Warehouse Specialist', 'Mechanic', 'WH2,SW,QA', 'id', true, adminHash, adminSalt, '']);
-  }
 }
 
 function getSheetObjects(sheet) {
@@ -1068,10 +850,6 @@ function getSheetObjects(sheet) {
   return result;
 }
 
-/**
- * FUNGSI UJI COBA LANGSUNG DI DALAM GOOGLE APPS SCRIPT (Run -> testDirectMutation)
- * Anda dapat memilih fungsi ini di Apps Script editor dan mengklik 'Run' untuk verifikasi!
- */
 function testDirectMutation() {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -1082,6 +860,644 @@ function testDirectMutation() {
 
   var initial = handleGetInitialData({ username: 'Admin' });
   Logger.log("Total Mesin Terbaca: " + initial.totalRows);
+}
+
+// ============================================================================
+// FITUR MAPPING POSISI MESIN DI RAK (khusus site WH2)
+// Format Location ID: WH2-{RAK}-{TINGKAT}{KOLOM}-S{SLOT}
+// Contoh: WH2-R4-B12-S2 = rak R4, tingkat B, kolom 12, slot 2
+// ============================================================================
+
+var RACK_SITE = 'WH2';
+var RACK_MAX_COL = { R1: 32, R2: 28, R3: 28, R4: 26, R5: 15, R6: 15 };
+var RACK_LEVELS = ['A', 'B', 'C'];
+var RACK_MAX_SLOT = 3;
+
+function handleGetRackMap(user, params) {
+  var sh = getMachineAssetSheet(getSpreadsheet());
+  var idx = getSheetColumnIndices(sh);
+  var data = idx.data;
+
+  if (idx.locationId === -1) {
+    return { success: false, message: 'Kolom Location ID tidak ditemukan' };
+  }
+
+  var re = /^WH2-(R[1-6])-([ABC])(\d+)-S([1-3])$/i;
+  var slots = [];
+
+  for (var r = 1; r < data.length; r++) {
+    var loc = String(data[r][idx.locationId] || '').trim();
+    var m = re.exec(loc);
+    if (!m) continue;
+
+    slots.push({
+      assetCode: idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : '',
+      barcode: idx.barcode !== -1 ? String(data[r][idx.barcode] || '').trim() : '',
+      serial: idx.serial !== -1 ? String(data[r][idx.serial] || '').trim() : '',
+      name: idx.standardMachineName !== -1 ? String(data[r][idx.standardMachineName] || '').trim() : '',
+      model: idx.model !== -1 ? String(data[r][idx.model] || '').trim() : '',
+      site: RACK_SITE,
+      rak: m[1].toUpperCase(),
+      tingkat: m[2].toUpperCase(),
+      kolom: Number(m[3]),
+      slot: Number(m[4])
+    });
+  }
+
+  return { success: true, total: slots.length, slots: slots };
+}
+
+function handleAssignRackSlot(user, params) {
+  params = params || {};
+
+  var reqSite = String(params.siteId || RACK_SITE).trim().toUpperCase();
+  if (reqSite !== RACK_SITE) {
+    return { success: false, message: 'Fitur rak hanya berlaku untuk site ' + RACK_SITE };
+  }
+
+  var rak = String(params.rak || '').trim().toUpperCase();
+  var tingkat = String(params.tingkat || '').trim().toUpperCase();
+  var kolom = Number(params.kolom);
+  var slot = Number(params.slot);
+
+  if (!RACK_MAX_COL[rak]) {
+    return { success: false, message: 'Rak tidak valid: ' + rak };
+  }
+  if (RACK_LEVELS.indexOf(tingkat) === -1) {
+    return { success: false, message: 'Tingkat tidak valid: ' + tingkat + ' (harus A, B, atau C)' };
+  }
+  if (!isFinite(kolom) || kolom < 1 || kolom > RACK_MAX_COL[rak] || kolom % 1 !== 0) {
+    return { success: false, message: 'Kolom tidak valid. Rak ' + rak + ' memiliki kolom 1-' + RACK_MAX_COL[rak] };
+  }
+  if (!isFinite(slot) || slot < 1 || slot > RACK_MAX_SLOT || slot % 1 !== 0) {
+    return { success: false, message: 'Slot tidak valid (harus 1-' + RACK_MAX_SLOT + ')' };
+  }
+
+  var targetLoc = RACK_SITE + '-' + rak + '-' + tingkat + kolom + '-S' + slot;
+
+  var sh = getMachineAssetSheet(getSpreadsheet());
+  var idx = getSheetColumnIndices(sh);
+  var data = idx.data;
+
+  var qAsset = String(params.assetCode || '').trim();
+  var qBarcode = String(params.barcode || '').trim();
+  var qSerial = String(params.serial || '').trim();
+  if (!qAsset && !qBarcode && !qSerial) {
+    return { success: false, message: 'Kode aset / barcode / serial wajib diisi' };
+  }
+
+  var rowIndex = findMachineRow(data, idx, qAsset, qBarcode, qSerial);
+  if (rowIndex === -1) {
+    return { success: false, message: 'Mesin ' + (qAsset || qBarcode || qSerial) + ' tidak ditemukan' };
+  }
+
+  var machineRow = data[rowIndex - 1];
+  var machineAsset = idx.assetCode !== -1 ? String(machineRow[idx.assetCode] || '').trim() : qAsset;
+  var currentLoc = idx.locationId !== -1 ? String(machineRow[idx.locationId] || '').trim() : '';
+  var rawStatus = idx.status !== -1 ? String(machineRow[idx.status] || '').trim().toUpperCase() : 'ACTIVE';
+  var pending = idx.pendingTransferId !== -1 ? String(machineRow[idx.pendingTransferId] || '').trim() : '';
+
+  if (currentLoc.toUpperCase().indexOf(RACK_SITE) !== 0) {
+    return { success: false, message: 'Mesin ' + machineAsset + ' berada di lokasi ' + currentLoc + ', bukan di ' + RACK_SITE };
+  }
+  if (rawStatus.indexOf('SOLD') !== -1) {
+    return { success: false, message: 'Mesin ' + machineAsset + ' berstatus SOLD dan tidak bisa ditempatkan' };
+  }
+  if (pending) {
+    return { success: false, message: 'Mesin ' + machineAsset + ' sedang dalam proses transfer (' + pending + ')' };
+  }
+  if (currentLoc.toUpperCase() === targetLoc.toUpperCase()) {
+    return { success: false, message: 'Mesin ' + machineAsset + ' sudah berada di slot ini' };
+  }
+
+  if (idx.locationId !== -1) {
+    for (var r = 1; r < data.length; r++) {
+      var loc = String(data[r][idx.locationId] || '').trim();
+      if (loc.toUpperCase() === targetLoc.toUpperCase() && (r + 1) !== rowIndex) {
+        var occupant = idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : ('baris ' + (r + 1));
+        return { success: false, message: 'Slot ' + targetLoc + ' sudah terisi oleh ' + occupant };
+      }
+    }
+  }
+
+  var moveParams = {
+    assetCode: machineAsset,
+    locationId: targetLoc,
+    siteId: RACK_SITE,
+    reason: params.reason || ('Penempatan di rak ' + targetLoc),
+    byUser: params.byUser || (user && user.username) || 'Admin'
+  };
+  var result = handleMoveMachine(user, moveParams);
+
+  if (result && result.success) {
+    result.rak = rak;
+    result.tingkat = tingkat;
+    result.kolom = kolom;
+    result.slot = slot;
+    result.locationId = targetLoc;
+  }
+  return result;
+}
+
+// ============================================================================
+// AUTENTIKASI & OTORISASI - sheet "user" (NIK | PASSWORD | PROFILE | AUTHORITY)
+// ============================================================================
+var ALL_SITES = ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA'];
+var MAX_FAIL = 5;
+var LOCK_SECONDS = 600;
+
+// ---------- Pengaman password ----------
+function getPepper() {
+  var prop = PropertiesService.getScriptProperties().getProperty('PEPPER');
+  return prop || PEPPER || 'PT_WINNERS_APP_SECRET_PEPPER_2026';
+}
+
+function hashPassword(pw, nik) {
+  var cleanNik = String(nik || '').trim().toLowerCase();
+  var cleanPw = String(pw || '');
+  return 'h1$' + computeSha256(cleanNik + ':' + cleanPw + ':' + getPepper());
+}
+
+function verifyPassword(stored, input, nik) {
+  stored = String(stored || '').trim();
+  input = String(input || '');
+  var cleanNik = String(nik || '').trim().toLowerCase();
+  var rawNik = String(nik || '').trim();
+  var pep = getPepper();
+  if (!stored || !input) return false;
+
+  // 1. Direct plaintext match & exact comparison
+  if (stored === input || stored.trim() === input.trim()) {
+    return true;
+  }
+
+  // 2. Format hash h1$ (h1$ + SHA256)
+  if (stored.toLowerCase().indexOf('h1$') === 0) {
+    var storedLower = stored.toLowerCase();
+    var h1Clean = ('h1$' + computeSha256(cleanNik + ':' + input + ':' + pep)).toLowerCase();
+    var h1Raw = ('h1$' + computeSha256(rawNik + ':' + input + ':' + pep)).toLowerCase();
+    var h1Rev = ('h1$' + computeSha256(input + ':' + cleanNik + ':' + pep)).toLowerCase();
+    var h1NoNik = ('h1$' + computeSha256(input + ':' + pep)).toLowerCase();
+    var h1Direct = ('h1$' + computeSha256(cleanNik + ':' + input.trim() + ':' + pep)).toLowerCase();
+
+    if (
+      storedLower === h1Clean ||
+      storedLower === h1Raw ||
+      storedLower === h1Rev ||
+      storedLower === h1NoNik ||
+      storedLower === h1Direct
+    ) {
+      return true;
+    }
+  }
+
+  // 3. Format 64-hex karakter SHA-256 hash
+  var storedHexLower = stored.toLowerCase();
+  var cleanInputHash = computeSha256(cleanNik + ':' + input + ':' + pep).toLowerCase();
+  var rawInputHash = computeSha256(rawNik + ':' + input + ':' + pep).toLowerCase();
+  var directHash = computeSha256(input + pep).toLowerCase();
+  var pureHash = computeSha256(input).toLowerCase();
+
+  if (
+    storedHexLower === cleanInputHash ||
+    storedHexLower === rawInputHash ||
+    storedHexLower === directHash ||
+    storedHexLower === pureHash
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+// ---------- Sheet user ----------
+function getUserSheet() {
+  var ss = getSpreadsheet();
+  var sheets = ss.getSheets();
+  var candidates = ['user', 'users', 'pengguna', 'daftar_user', 'users_list', 'akun', 'account', 'accounts', 'sheet_user', 'data_user', 'master_user'];
+  for (var i = 0; i < sheets.length; i++) {
+    var n = sheets[i].getName().toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (var j = 0; j < candidates.length; j++) {
+      if (n === candidates[j]) return sheets[i];
+    }
+  }
+  // Cek sheet yang mengandung kata 'user' atau 'pengguna'
+  for (var i = 0; i < sheets.length; i++) {
+    var n = sheets[i].getName().toLowerCase();
+    if (n.indexOf('user') !== -1 || n.indexOf('pengguna') !== -1 || n.indexOf('akun') !== -1) {
+      return sheets[i];
+    }
+  }
+
+  // Jika belum ada, otomatis buat sheet 'user' dengan header standar
+  var newSh = ss.insertSheet('user');
+  newSh.appendRow(['NIK', 'PASSWORD', 'PROFILE', 'AUTHORITY', 'ACTIVE']);
+  newSh.getRange(1, 1, 1, 5).setBackground('#0f172a').setFontColor('#ffffff').setFontWeight('bold');
+  newSh.appendRow(['admin', hashPassword('winners123', 'admin'), 'Super Administrator', 'admin master', true]);
+  newSh.getRange(2, 1).setNumberFormat('@');
+  return newSh;
+}
+
+function getUserCols(sheet) {
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    return { nik: 0, password: 1, profile: 2, authority: 3, active: 4, width: 5 };
+  }
+  var head = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function (h) { return String(h).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); });
+
+  var findIndex = function(terms, defaultIdx) {
+    for (var i = 0; i < terms.length; i++) {
+      var cleanTerm = terms[i].toLowerCase().replace(/[^a-z0-9]/g, '');
+      var idx = head.indexOf(cleanTerm);
+      if (idx !== -1) return idx;
+    }
+    return defaultIdx;
+  };
+
+  return {
+    nik: findIndex(['nik', 'username', 'userid', 'id', 'noinduk', 'nomorinduk', 'nip', 'user'], 0),
+    password: findIndex(['password', 'passwordhash', 'pass', 'katasandi', 'hash', 'pwd'], 1),
+    profile: findIndex(['profile', 'displayname', 'nama', 'namalengkap', 'name', 'fullname', 'username'], 2),
+    authority: findIndex(['authority', 'role', 'hakakses', 'otoritas', 'akses', 'level', 'jabatan'], 3),
+    active: findIndex(['active', 'status', 'aktif', 'isactive', 'enabled'], -1),
+    width: Math.max(head.length, 5)
+  };
+}
+
+function parseAuthority(a) {
+  var s = String(a || '').toLowerCase().replace(/\\s+/g, '');
+  if (s === 'adminmaster' || s === 'admin' || s === 'administrator' || s === 'superadmin' || s === 'admin_master' || s === 'master') {
+    return { role: 'ADMIN_MASTER', sites: ALL_SITES.slice() };
+  }
+  if (s === 'allsites' || s === 'all' || s === 'semuasite' || s === 'all_sites' || s === 'semuapabrik') {
+    return { role: 'ALL_SITES', sites: ALL_SITES.slice() };
+  }
+  var m = s.match(/(?:pt\\.?winners|pw|factory|pabrik)?\\(?([1-3])\\)?/);
+  if (m && m[1]) {
+    return { role: 'FACTORY', sites: ['PW' + m[1]], factory: m[1] };
+  }
+  if (s.indexOf('1') > -1) return { role: 'FACTORY', sites: ['PW1'], factory: '1' };
+  if (s.indexOf('2') > -1) return { role: 'FACTORY', sites: ['PW2'], factory: '2' };
+  if (s.indexOf('3') > -1) return { role: 'FACTORY', sites: ['PW3'], factory: '3' };
+  return { role: 'FACTORY', sites: ['PW1'], factory: '1' };
+}
+
+function canonicalAuthority(a) {
+  var p = parseAuthority(a);
+  if (!p) return 'PW1';
+  if (p.role === 'ADMIN_MASTER') return 'admin master';
+  if (p.role === 'ALL_SITES') return 'All sites';
+  return 'PT.Winners(' + p.factory + ')';
+}
+
+function ensureSessionsSheet() {
+  var ss = getSpreadsheet(), sh = ss.getSheetByName('Sessions');
+  if (!sh) {
+    sh = ss.insertSheet('Sessions');
+    sh.appendRow(['Token', 'Username', 'Role', 'SiteAccess', 'CreatedAt', 'ExpiresAt']);
+  }
+  return sh;
+}
+
+// ---------- LOGIN ----------
+function handleLogin(username, password) {
+  username = String(username || '').trim();
+  password = String(password || '');
+  if (!username || !password) return { success: false, message: 'NIK dan password wajib diisi' };
+
+  var cache = CacheService.getScriptCache();
+  var key = 'fail_' + username.toLowerCase();
+  var fails = parseInt(cache.get(key) || '0', 10);
+  if (fails >= MAX_FAIL) {
+    return { success: false, message: 'Terlalu banyak percobaan gagal. Coba lagi dalam 10 menit.' };
+  }
+
+  var sh = getUserSheet();
+  if (!sh) return { success: false, message: 'Sheet "user" tidak ditemukan' };
+  var c = getUserCols(sh);
+  if (c.nik < 0 || c.password < 0 || c.authority < 0) {
+    return { success: false, message: 'Header sheet user harus: NIK, PASSWORD, PROFILE, AUTHORITY' };
+  }
+
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (String(row[c.nik]).trim().toLowerCase() !== username.toLowerCase()) continue;
+
+    if (c.active > -1 &&
+        ['false', 'no', '0', 'nonaktif'].indexOf(String(row[c.active]).trim().toLowerCase()) > -1) {
+      return { success: false, message: 'Akun dinonaktifkan' };
+    }
+    if (verifyPassword(row[c.password], password, username)) {
+      var auth = parseAuthority(row[c.authority]);
+      if (!auth) return { success: false, message: 'Authority akun tidak dikenali. Hubungi admin.' };
+
+      cache.remove(key);
+      var nik = String(row[c.nik]).trim();
+      var token = 'TKN-' + Utilities.getUuid();
+      ensureSessionsSheet();
+      saveSession(token, nik, auth.role, auth.sites);
+      return {
+        success: true,
+        token: token,
+        user: {
+          username: nik,
+          displayName: c.profile > -1 ? String(row[c.profile]) : nik,
+          role: auth.role,
+          siteAccess: auth.sites,
+          canAddUser: auth.role === 'ADMIN_MASTER',
+          canUseRackMap: auth.sites.indexOf('WH2') > -1
+        }
+      };
+    }
+  }
+  cache.put(key, String(fails + 1), LOCK_SECONDS);
+  return { success: false, message: 'NIK atau password salah' };
+}
+
+// ---------- Manajemen user ----------
+function handleAddUser(user, p) {
+  var nik = String(p.nik || '').trim();
+  var pw = String(p.password || '');
+  var profile = String(p.profile || '').trim();
+  var auth = canonicalAuthority(p.authority);
+
+  if (!/^[A-Za-z0-9._-]{3,20}$/.test(nik)) return { success: false, message: 'NIK harus 3-20 karakter (huruf/angka)' };
+  if (pw.length < 6) return { success: false, message: 'Password minimal 6 karakter' };
+  if (!profile) return { success: false, message: 'Nama (profile) wajib diisi' };
+  if (!auth) return { success: false, message: 'Authority tidak valid (admin master / all sites / PW1 / PW2 / PW3)' };
+
+  var sh = getUserSheet();
+  if (!sh) return { success: false, message: 'Sheet "user" tidak ditemukan' };
+  var c = getUserCols(sh);
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][c.nik]).trim().toLowerCase() === nik.toLowerCase()) {
+      return { success: false, message: 'NIK ' + nik + ' sudah terdaftar' };
+    }
+  }
+  var row = [];
+  for (var k = 0; k < c.width; k++) row.push('');
+  row[c.nik] = nik;
+  row[c.password] = hashPassword(pw, nik);
+  row[c.profile] = profile;
+  row[c.authority] = auth;
+  if (c.active > -1) row[c.active] = true;
+  sh.appendRow(row);
+  sh.getRange(sh.getLastRow(), c.nik + 1).setNumberFormat('@').setValue(nik);
+  return { success: true, message: 'User ' + nik + ' (' + profile + ') berhasil ditambahkan' };
+}
+
+function handleListUsers(user) {
+  var sh = getUserSheet();
+  if (!sh) return { success: false, message: 'Sheet "user" tidak ditemukan' };
+  var c = getUserCols(sh), data = sh.getDataRange().getValues(), out = [];
+  for (var i = 1; i < data.length; i++) {
+    var rawNik = String(data[i][c.nik] || '').trim();
+    if (!rawNik) continue;
+    var rawProfile = c.profile > -1 ? String(data[i][c.profile] || '').trim() : '';
+    var rawAuth = String(data[i][c.authority] || 'PW1').trim();
+    var rawActive = c.active > -1 ? (data[i][c.active] === true || String(data[i][c.active]).toLowerCase() === 'true' || data[i][c.active] === 1 || data[i][c.active] === '1') : true;
+
+    var authLower = rawAuth.toLowerCase();
+    var serverRole = 'UNKNOWN';
+    var sites = [];
+    var rackMap = false;
+    var canAdd = false;
+
+    if (authLower === 'admin master' || authLower === 'admin' || authLower === 'administrator') {
+      serverRole = 'ADMIN_MASTER';
+      sites = ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA'];
+      rackMap = true;
+      canAdd = true;
+    } else if (authLower === 'all sites' || authLower === 'all') {
+      serverRole = 'ALL_SITES';
+      sites = ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA'];
+      rackMap = true;
+      canAdd = false;
+    } else if (['PW1', 'PW2', 'PW3'].indexOf(rawAuth.toUpperCase()) > -1) {
+      serverRole = 'FACTORY';
+      sites = [rawAuth.toUpperCase()];
+      rackMap = false;
+      canAdd = false;
+    }
+
+    out.push({
+      nik: rawNik,
+      profile: rawProfile,
+      authority: rawAuth,
+      role: serverRole,
+      sites: sites,
+      rackMap: rackMap,
+      canAddUser: canAdd,
+      active: rawActive
+    });
+  }
+  return { success: true, users: out };
+}
+
+function handleUpdateUser(user, p) {
+  var targetNik = String(p.nik || '').trim();
+  if (!targetNik) return { success: false, message: 'NIK wajib ditentukan' };
+  var sh = getUserSheet();
+  if (!sh) return { success: false, message: 'Sheet "user" tidak ditemukan' };
+  var c = getUserCols(sh), data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][c.nik]).trim().toLowerCase() === targetNik.toLowerCase()) {
+      if (typeof p.profile !== 'undefined' && c.profile > -1) {
+        sh.getRange(i + 1, c.profile + 1).setValue(String(p.profile).trim());
+      }
+      if (typeof p.authority !== 'undefined') {
+        var auth = canonicalAuthority(p.authority);
+        if (auth) sh.getRange(i + 1, c.authority + 1).setValue(auth);
+      }
+      if (typeof p.active !== 'undefined' && c.active > -1) {
+        sh.getRange(i + 1, c.active + 1).setValue(Boolean(p.active));
+      }
+      return { success: true, message: 'Pengguna ' + targetNik + ' berhasil diperbarui' };
+    }
+  }
+  return { success: false, message: 'Pengguna ' + targetNik + ' tidak ditemukan' };
+}
+
+function handleResetPassword(user, p) {
+  var targetNik = String(p.nik || '').trim();
+  var newPw = String(p.newPassword || '');
+  if (!targetNik) return { success: false, message: 'NIK wajib ditentukan' };
+  if (newPw.length < 6) return { success: false, message: 'Password baru minimal 6 karakter' };
+  var sh = getUserSheet();
+  if (!sh) return { success: false, message: 'Sheet "user" tidak ditemukan' };
+  var c = getUserCols(sh), data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][c.nik]).trim().toLowerCase() === targetNik.toLowerCase()) {
+      sh.getRange(i + 1, c.password + 1).setNumberFormat('@').setValue(hashPassword(newPw, targetNik));
+      return { success: true, message: 'Password pengguna ' + targetNik + ' berhasil direset' };
+    }
+  }
+  return { success: false, message: 'Pengguna ' + targetNik + ' tidak ditemukan' };
+}
+
+function handleChangePassword(user, p) {
+  var oldPw = String(p.oldPassword || ''), newPw = String(p.newPassword || '');
+  if (newPw.length < 6) return { success: false, message: 'Password baru minimal 6 karakter' };
+  var sh = getUserSheet(), c = getUserCols(sh), data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][c.nik]).trim().toLowerCase() === String(user.username).toLowerCase()) {
+      if (!verifyPassword(data[i][c.password], oldPw, user.username)) {
+        return { success: false, message: 'Password lama salah' };
+      }
+      sh.getRange(i + 1, c.password + 1).setValue(hashPassword(newPw, user.username));
+      return { success: true, message: 'Password berhasil diubah' };
+    }
+  }
+  return { success: false, message: 'User tidak ditemukan' };
+}
+
+// ---------- Hak akses per site ----------
+function hasSite(user, site) {
+  site = String(site || '').trim().toUpperCase();
+  if (!site) return false;
+  return user.siteAccess.map(function (s) { return String(s).toUpperCase(); }).indexOf(site) > -1;
+}
+
+function siteOfLocation(loc) {
+  var s = String(loc || '').trim().toUpperCase().split('-')[0];
+  return ALL_SITES.indexOf(s) > -1 ? s : '';
+}
+
+function currentSiteOfMachine(p) {
+  var sh = getMachineAssetSheet(getSpreadsheet());
+  var idx = getSheetColumnIndices(sh);
+  var row = findMachineRow(idx.data, idx, p.assetCode, p.barcode || p.barcode12, p.serial);
+  if (row === -1) return null;
+  var r = idx.data[row - 1];
+  var s = idx.locationId !== -1 ? siteOfLocation(r[idx.locationId]) : '';
+  if (!s && idx.siteId !== -1) s = String(r[idx.siteId] || '').trim().toUpperCase();
+  return s;
+}
+
+function deny(msg) { return { success: false, error: 'FORBIDDEN', message: msg }; }
+
+function checkPermission(user, action, p) {
+  if (['ADD_USER', 'LIST_USERS', 'UPDATE_USER', 'RESET_PASSWORD', 'ADMIN_AUDIT_FIX'].indexOf(action) > -1 && user.role !== 'ADMIN_MASTER') {
+    return deny('Hanya admin master yang dapat melakukan aksi ini');
+  }
+  if (action === 'GET_RACK_MAP' || action === 'ASSIGN_RACK_SLOT') {
+    if (!hasSite(user, 'WH2')) return deny('Rack Map WH2 tidak dapat diakses oleh akun factory');
+  }
+  if (['MOVE_MACHINE', 'UPDATE_MACHINE', 'UNDO_MOVE'].indexOf(action) > -1) {
+    var cur = currentSiteOfMachine(p);
+    if (cur && !hasSite(user, cur)) return deny('Mesin berada di site ' + cur + ', di luar akses Anda');
+    if (action !== 'UNDO_MOVE') {
+      var targets = [siteOfLocation(p.locationId || p.toLocationId), String(p.siteId || p.toSiteId || '').toUpperCase()];
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i] && ALL_SITES.indexOf(targets[i]) > -1 && !hasSite(user, targets[i])) {
+          return deny('Anda tidak memiliki akses ke site ' + targets[i]);
+        }
+      }
+    }
+  }
+  if (action === 'SEND_TRANSFER' && p.fromSite && !hasSite(user, p.fromSite)) return deny('Site asal di luar akses Anda');
+  if (action === 'RECEIVE_TRANSFER' && p.toSite && !hasSite(user, p.toSite)) return deny('Site tujuan di luar akses Anda');
+  if (action === 'SAVE_OPNAME' && p.session) {
+    var os = p.session.siteId || p.session.site || siteOfLocation(p.session.locationId);
+    if (os && !hasSite(user, os)) return deny('Opname di site ' + os + ' di luar akses Anda');
+  }
+  return null;
+}
+
+function filterForUser(res, user) {
+  if (!res || !res.success) return res;
+  var ok = function (s) { return hasSite(user, s); };
+  res.machines = (res.machines || []).filter(function (m) { return ok(m.siteId); });
+  res.transfers = (res.transfers || []).filter(function (t) { return ok(t.FromSite) || ok(t.ToSite); });
+  res.sites = (res.sites || []).filter(function (s) { return ok(s.SiteID); });
+  res.locations = (res.locations || []).filter(function (l) { return ok(l.SiteID); });
+  res.totalRows = res.machines.length;
+  return res;
+}
+
+function filterSearch(res, user) {
+  if (!res || !res.success || !res.machine) return res;
+  var s = siteOfLocation(res.machine.locationId) || String(res.machine.siteId || '').toUpperCase();
+  if (s && !hasSite(user, s)) return { success: false, message: 'Mesin tidak ditemukan atau di luar akses Anda' };
+  return res;
+}
+
+// ---------- Router utama ----------
+function authorize(token, action, params) {
+  params = params || {};
+  var PUBLIC = { LOGIN: 1, PING: 1 };
+  var user = null;
+
+  if (!PUBLIC[action]) {
+    user = validateSession(token);
+    if (!user) {
+      return { success: false, error: 'UNAUTHORIZED', message: 'Sesi tidak valid atau sudah berakhir. Silakan login kembali.' };
+    }
+    var denied = checkPermission(user, action, params);
+    if (denied) return denied;
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    switch (action) {
+      case 'LOGIN':            return handleLogin(params.username, params.password);
+      case 'PING':             return { success: true, message: 'Koneksi ke Google Apps Script berhasil', timestamp: new Date().toISOString() };
+      case 'ME':               return { success: true, user: user };
+
+      case 'GET_INITIAL_DATA':
+      case 'GET_MACHINES':     return filterForUser(handleGetInitialData(user), user);
+      case 'SEARCH_MACHINE':   return filterSearch(handleSearchMachine(user, params.query), user);
+
+      case 'MOVE_MACHINE':
+      case 'UPDATE_MACHINE':   return handleMoveMachine(user, params);
+      case 'UNDO_MOVE':        return handleUndoMove(user, params);
+      case 'SEND_TRANSFER':    return handleSendTransfer(user, params);
+      case 'RECEIVE_TRANSFER': return handleReceiveTransfer(user, params);
+      case 'CANCEL_TRANSFER':  return handleCancelTransfer(user, params);
+      case 'SAVE_OPNAME':      return handleSaveOpname(user, params);
+      case 'ADMIN_AUDIT_FIX':  return handleAdminAuditFix(user);
+
+      case 'GET_RACK_MAP':     return handleGetRackMap(user, params);
+      case 'ASSIGN_RACK_SLOT': return handleAssignRackSlot(user, params);
+
+      case 'ADD_USER':         return handleAddUser(user, params);
+      case 'UPDATE_USER':      return handleUpdateUser(user, params);
+      case 'RESET_PASSWORD':   return handleResetPassword(user, params);
+      case 'LIST_USERS':       return handleListUsers(user);
+      case 'CHANGE_PASSWORD':  return handleChangePassword(user, params);
+
+      default: return { success: false, message: 'Aksi tidak dikenal: ' + action };
+    }
+  } catch (err) {
+    return { success: false, message: 'Server Lock/Timeout Error: ' + err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------- Setup sekali jalan (jalankan manual dari editor) ----------
+function setupSecurity() {
+  PropertiesService.getScriptProperties().setProperty('PEPPER', PEPPER || 'PT_WINNERS_APP_SECRET_PEPPER_2026');
+}
+
+function migratePasswordsToHash() {
+  var pepper = getPepper();
+  if (!pepper) throw new Error('Pepper keamanan tidak ditemukan. Jalankan setupSecurity() terlebih dahulu.');
+  var sh = getUserSheet();
+  if (!sh) throw new Error('Sheet "user" tidak ditemukan');
+  var c = getUserCols(sh), data = sh.getDataRange().getValues(), n = 0;
+  for (var i = 1; i < data.length; i++) {
+    var nik = String(data[i][c.nik]).trim(), pw = String(data[i][c.password]);
+    if (nik && pw && pw.indexOf('h1$') !== 0) {
+      sh.getRange(i + 1, c.password + 1).setNumberFormat('@').setValue(hashPassword(pw, nik));
+      n++;
+    }
+  }
+  Logger.log('Password dimigrasi: ' + n + ' akun');
 }
 `;
 }

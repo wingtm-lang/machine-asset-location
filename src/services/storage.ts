@@ -20,6 +20,7 @@ import {
   MachineStatus,
   SiteId,
 } from '../types';
+import { postGasApi } from './gasAuthService';
 import {
   INITIAL_SITES,
   INITIAL_RACKS,
@@ -108,12 +109,23 @@ class StorageService {
   public init() {
     if (this.isInitialized) return;
 
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('ptwinners_tracker_settings');
+        localStorage.removeItem('ptwinners_gas_url');
+        localStorage.removeItem('gas_url');
+      } catch {}
+    }
+
     // Check LocalStorage or seed fresh
     const savedData = typeof window !== 'undefined' ? localStorage.getItem('ptwinners_tracker_db_v1') : null;
 
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData);
+        if (parsed.settings && parsed.settings.gasWebAppUrl) {
+          delete parsed.settings.gasWebAppUrl;
+        }
         this.sites = parsed.sites || INITIAL_SITES;
         this.racks = parsed.racks || INITIAL_RACKS;
         this.locations = parsed.locations || generateLocations();
@@ -130,9 +142,6 @@ class StorageService {
         this.settings = { ...INITIAL_SETTINGS, ...(parsed.settings || {}) };
         if (!this.settings.spreadsheetId) {
           this.settings.spreadsheetId = INITIAL_SETTINGS.spreadsheetId;
-        }
-        if (!this.settings.gasWebAppUrl) {
-          this.settings.gasWebAppUrl = INITIAL_SETTINGS.gasWebAppUrl;
         }
 
         if (this.machines.length === 0) {
@@ -329,8 +338,9 @@ class StorageService {
 
   /**
    * Move Machine within the same site (Fase 3 & A5.1)
+   * Menunggu respons server (MOVE_MACHINE), hanya terapkan di lokal jika server sukses.
    */
-  public moveMachine(params: {
+  public async moveMachine(params: {
     assetCode: string;
     targetLocationId: string;
     username: string;
@@ -339,7 +349,7 @@ class StorageService {
     newStatus?: MachineStatus;
     loanTo?: string;
     loanDueDate?: string;
-  }): { success: boolean; message: string; machine?: Machine; movement?: Movement } {
+  }): Promise<{ success: boolean; message: string; machine?: Machine; movement?: Movement }> {
     const { assetCode, targetLocationId, username, userSiteAccess, reason, newStatus, loanTo, loanDueDate } = params;
 
     const machine = this.assetCodeMap.get(assetCode.toUpperCase());
@@ -398,10 +408,34 @@ class StorageService {
       }
     }
 
+    // Kirim ke backend server Google Apps Script dan TUNGGU respons
+    try {
+      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('MOVE_MACHINE', {
+        assetCode: machine.assetCode,
+        barcode: machine.barcode,
+        locationId: finalTargetLocationId,
+        siteId: machine.siteId,
+        status: newStatus || machine.status,
+        reason: reason || (newStatus === 'SOLD' ? 'Status diubah menjadi SOLD (Terjual/Afkir)' : 'Pemindahan normal'),
+      });
+
+      if (!serverRes || !serverRes.success) {
+        return {
+          success: false,
+          message: serverRes?.message || 'Gagal memindahkan mesin di server.',
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke server untuk memindahkan mesin.',
+      };
+    }
+
+    // Hanya jika respons server success: true, terapkan perubahan di lokal
     const fromLoc = machine.locationId;
     const now = new Date().toISOString();
 
-    // Update Machine
     machine.locationId = finalTargetLocationId;
     machine.lastMovedAt = now;
     machine.lastMovedBy = username;
@@ -433,7 +467,6 @@ class StorageService {
       });
     }
 
-    // Append-only Movement record
     const movement: Movement = {
       movementId: `MOV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: now,
@@ -454,21 +487,7 @@ class StorageService {
     this.movements.unshift(movement);
     this.logAudit(username, 'MOVE_MACHINE', `Pindah ${machine.assetCode} dari ${fromLoc} ke ${finalTargetLocationId}`);
     this.save();
-
-    // Async write-back to Google Spreadsheet via Google Apps Script Web App
-    this.postToGasBackend({
-      action: 'UPDATE_MACHINE',
-      assetCode: machine.assetCode,
-      barcode: machine.barcode,
-      locationId: finalTargetLocationId,
-      siteId: machine.siteId,
-      status: machine.status,
-      lastMovedAt: now,
-      lastMovedBy: username,
-      reason: reason || '',
-      loanTo: machine.loanTo || '',
-      loanDueDate: machine.loanDueDate || '',
-    });
+    this.notifyListeners();
 
     return {
       success: true,
@@ -482,12 +501,13 @@ class StorageService {
 
   /**
    * Undo Last Move within 60 minutes by same user (A5.5)
+   * Menunggu respons server (UNDO_MOVE), hanya terapkan di lokal jika server sukses.
    */
-  public undoLastMove(params: {
+  public async undoLastMove(params: {
     assetCode: string;
     username: string;
     isAdmin: boolean;
-  }): { success: boolean; message: string } {
+  }): Promise<{ success: boolean; message: string }> {
     const { assetCode, username, isAdmin } = params;
     const machine = this.assetCodeMap.get(assetCode.toUpperCase());
     if (!machine) {
@@ -515,6 +535,27 @@ class StorageService {
     const currentLocation = machine.locationId;
     const isoNow = new Date().toISOString();
 
+    // Kirim UNDO_MOVE ke server TERLEBIH DAHULU
+    try {
+      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('UNDO_MOVE', {
+        assetCode: machine.assetCode,
+        historyId: lastMov.movementId,
+      });
+
+      if (!serverRes || !serverRes.success) {
+        return {
+          success: false,
+          message: serverRes?.message || 'Gagal membatalkan pemindahan di server.',
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke server untuk membatalkan pemindahan.',
+      };
+    }
+
+    // Hanya jika server berhasil, terapkan di lokal
     machine.locationId = previousLocation;
     machine.lastMovedAt = isoNow;
     machine.lastMovedBy = `${username} (UNDO)`;
@@ -537,49 +578,124 @@ class StorageService {
     this.movements.unshift(undoMovement);
     this.logAudit(username, 'UNDO_MOVE', `Undo ${machine.assetCode} kembali ke ${previousLocation}`);
     this.save();
-
-    // Async write-back to Google Spreadsheet via Google Apps Script Web App
-    this.postToGasBackend({
-      action: 'UNDO_MOVE',
-      historyId: lastMov.movementId,
-      assetCode: machine.assetCode,
-      barcode: machine.barcode,
-      previousLocation,
-      siteId: machine.siteId,
-      username,
-    });
+    this.notifyListeners();
 
     return { success: true, message: `Pemindahan dibatalkan. Mesin ${machine.assetCode} dikembalikan ke ${previousLocation}.` };
   }
 
   /**
+   * Pemindahan lokasi langsung (digunakan oleh Rack Mapping WH2 & integrasi backend)
+   */
+  public setMachineLocationDirect(params: {
+    assetCode: string;
+    locationId: string;
+    siteId?: string;
+    username: string;
+    reason?: string;
+  }): { success: boolean; message: string } {
+    const { assetCode, locationId, username, reason } = params;
+    const siteId = params.siteId || 'WH2';
+    const machine = this.assetCodeMap.get(assetCode.toUpperCase());
+    if (!machine) {
+      return { success: false, message: `Mesin ${assetCode} tidak ditemukan di database lokal.` };
+    }
+
+    const fromLoc = machine.locationId;
+    const now = new Date().toISOString();
+
+    machine.locationId = locationId;
+    machine.siteId = siteId;
+    machine.lastMovedAt = now;
+    machine.lastMovedBy = username;
+    machine.updatedAt = now;
+    machine.updatedBy = username;
+
+    const movement: Movement = {
+      movementId: `MOV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      timestamp: now,
+      assetCode: machine.assetCode,
+      type: 'MOVE',
+      fromLocation: fromLoc,
+      toLocation: locationId,
+      fromSite: machine.siteId,
+      toSite: siteId,
+      reason: reason || `Penempatan di rak ${locationId}`,
+      byUser: username,
+    };
+
+    this.movements.unshift(movement);
+    this.logAudit(username, 'ASSIGN_RACK_SLOT', `Pindah ${machine.assetCode} dari ${fromLoc} ke ${locationId}`);
+    this.save();
+    this.notifyListeners();
+
+    return { success: true, message: `Mesin ${machine.assetCode} berhasil ditempatkan di ${locationId}.` };
+  }
+
+  /**
    * Transfer Step 1: Send Transfer to another site (Fase 4 & A5.2)
    */
-  public sendTransfer(params: {
+  public async sendTransfer(params: {
     assetCodes: string[];
     toSite: SiteId;
     sentBy: string;
     userSiteAccess: string[];
+    vehicleNo?: string;
+    driverName?: string;
     note?: string;
-  }): { success: boolean; message: string; count: number } {
-    const { assetCodes, toSite, sentBy, userSiteAccess, note } = params;
+  }): Promise<{ success: boolean; message: string; count: number }> {
+    const { assetCodes, toSite, sentBy, userSiteAccess, vehicleNo, driverName, note } = params;
+
+    const validCodes: string[] = [];
+    for (const code of assetCodes) {
+      const machine = this.assetCodeMap.get(code.toUpperCase());
+      if (!machine) continue;
+      if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(machine.siteId)) continue;
+      if (machine.pendingTransferId || machine.status === 'SOLD') continue;
+      if (machine.siteId === toSite) continue;
+      validCodes.push(machine.assetCode);
+    }
+
+    if (validCodes.length === 0) {
+      return { success: false, message: 'Tidak ada mesin yang valid untuk dikirim (periksa status atau izin).', count: 0 };
+    }
+
+    const firstMachine = this.assetCodeMap.get(validCodes[0].toUpperCase());
+    const fromSite = firstMachine?.siteId || '';
+
+    // Wait for server response first
+    try {
+      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('SEND_TRANSFER', {
+        assetCodes: validCodes,
+        fromSite,
+        toSite,
+        vehicleNo: vehicleNo || '',
+        driverName: driverName || '',
+        note: note || '',
+      });
+
+      if (!serverRes || !serverRes.success) {
+        return {
+          success: false,
+          message: serverRes?.message || 'Gagal mengirim transfer di server.',
+          count: 0,
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke server untuk mengirim transfer.',
+        count: 0,
+      };
+    }
+
+    // Apply mutation locally only after server success
     let count = 0;
     const now = new Date().toISOString();
     const batchId = `BATCH-${Date.now()}`;
 
-    for (const code of assetCodes) {
+    for (const code of validCodes) {
       const machine = this.assetCodeMap.get(code.toUpperCase());
       if (!machine) continue;
-
-      if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(machine.siteId)) {
-        continue;
-      }
-      if (machine.pendingTransferId || machine.status === 'SOLD') {
-        continue;
-      }
-      if (machine.siteId === toSite) {
-        continue;
-      }
 
       const transferId = `TRF-${Date.now()}-${count + 1}`;
       machine.pendingTransferId = transferId;
@@ -619,21 +735,7 @@ class StorageService {
 
     this.logAudit(sentBy, 'SEND_TRANSFER', `Mengirim ${count} mesin ke site ${toSite}`);
     this.save();
-
-    if (count === 0) {
-      return { success: false, message: 'Tidak ada mesin yang valid untuk dikirim (periksa status atau izin).', count: 0 };
-    }
-
-    // Async write-back to Google Spreadsheet via Google Apps Script Web App
-    this.postToGasBackend({
-      action: 'SEND_TRANSFER',
-      batchId,
-      assetCodes,
-      toSite,
-      sentBy,
-      note: note || '',
-      timestamp: now,
-    });
+    this.notifyListeners();
 
     return { success: true, message: `${count} mesin berhasil dikirim ke ${toSite} (Status: In Transit).`, count };
   }
@@ -641,12 +743,12 @@ class StorageService {
   /**
    * Transfer Step 2: Receive Transfer at destination site (Fase 4 & A5.2)
    */
-  public receiveTransfer(params: {
+  public async receiveTransfer(params: {
     transferId: string;
     toLocationId: string;
     receivedBy: string;
     userSiteAccess: string[];
-  }): { success: boolean; message: string } {
+  }): Promise<{ success: boolean; message: string }> {
     const { transferId, toLocationId, receivedBy, userSiteAccess } = params;
 
     const transfer = this.transfers.find((t) => t.transferId === transferId);
@@ -679,6 +781,27 @@ class StorageService {
       if (currentSlotMachines.length >= limit) {
         return { success: false, message: `Slot ${targetLoc.displayName} sudah penuh (maksimal ${limit} mesin).` };
       }
+    }
+
+    // Wait for server response
+    try {
+      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('RECEIVE_TRANSFER', {
+        transferId,
+        toLocationId,
+        toSite: transfer.toSite,
+      });
+
+      if (!serverRes || !serverRes.success) {
+        return {
+          success: false,
+          message: serverRes?.message || 'Gagal menerima transfer di server.',
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke server untuk menerima transfer.',
+      };
     }
 
     const now = new Date().toISOString();
@@ -714,18 +837,7 @@ class StorageService {
 
     this.logAudit(receivedBy, 'RECEIVE_TRANSFER', `Menerima mesin ${machine.assetCode} di ${toLocationId}`);
     this.save();
-
-    // Async write-back to Google Spreadsheet via Google Apps Script Web App
-    this.postToGasBackend({
-      action: 'RECEIVE_TRANSFER',
-      transferId,
-      assetCode: machine.assetCode,
-      barcode: machine.barcode,
-      toLocationId,
-      toSite: transfer.toSite,
-      receivedBy,
-      timestamp: now,
-    });
+    this.notifyListeners();
 
     return { success: true, message: `Mesin ${machine.assetCode} berhasil diterima dan ditempatkan di ${targetLoc.displayName}.` };
   }
@@ -733,7 +845,7 @@ class StorageService {
   /**
    * Cancel Transfer before receipt (A5.2)
    */
-  public cancelTransfer(transferId: string, username: string, userSiteAccess: string[]): { success: boolean; message: string } {
+  public async cancelTransfer(transferId: string, username: string, userSiteAccess: string[]): Promise<{ success: boolean; message: string }> {
     const transfer = this.transfers.find((t) => t.transferId === transferId);
     if (!transfer) return { success: false, message: 'Transfer tidak ditemukan.' };
     if (transfer.status !== 'IN_TRANSIT') return { success: false, message: 'Hanya transfer In Transit yang dapat dibatalkan.' };
@@ -743,6 +855,27 @@ class StorageService {
     }
 
     const machine = this.assetCodeMap.get(transfer.assetCode.toUpperCase());
+
+    // Wait for server response
+    try {
+      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('CANCEL_TRANSFER', {
+        transferId,
+        assetCode: machine?.assetCode || transfer.assetCode,
+      });
+
+      if (!serverRes || !serverRes.success) {
+        return {
+          success: false,
+          message: serverRes?.message || 'Gagal membatalkan transfer di server.',
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke server untuk membatalkan transfer.',
+      };
+    }
+
     if (machine) {
       machine.pendingTransferId = undefined;
     }
@@ -750,14 +883,7 @@ class StorageService {
     transfer.status = 'CANCELLED';
     this.logAudit(username, 'CANCEL_TRANSFER', `Membatalkan transfer ${transferId} (${transfer.assetCode})`);
     this.save();
-
-    // Async write-back to Google Spreadsheet via Google Apps Script Web App
-    this.postToGasBackend({
-      action: 'CANCEL_TRANSFER',
-      transferId,
-      assetCode: machine?.assetCode,
-      username,
-    });
+    this.notifyListeners();
 
     return { success: true, message: `Transfer ${transferId} berhasil dibatalkan.` };
   }
@@ -765,7 +891,33 @@ class StorageService {
   /**
    * Start / Save Opname Session (Fase 5 & A5.4)
    */
-  public saveOpnameSession(session: OpnameSession, items: OpnameItem[]): { success: boolean; message: string } {
+  public async saveOpnameSession(session: OpnameSession, items: OpnameItem[]): Promise<{ success: boolean; message: string }> {
+    // Wait for server response
+    try {
+      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('SAVE_OPNAME', {
+        session,
+        items: items.map((it) => ({
+          assetCode: it.assetCode,
+          barcode: it.barcode,
+          result: it.result,
+          scannedLocationId: it.currentActualLocation,
+          expectedLocationId: it.registeredLocation,
+        })),
+      });
+
+      if (!serverRes || !serverRes.success) {
+        return {
+          success: false,
+          message: serverRes?.message || 'Gagal menyimpan sesi opname di server.',
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke server untuk menyimpan sesi opname.',
+      };
+    }
+
     // Check if session exists
     const idx = this.opnameSessions.findIndex((s) => s.sessionId === session.sessionId);
     if (idx >= 0) {
@@ -792,19 +944,7 @@ class StorageService {
 
     this.logAudit(session.startedBy, 'OPNAME_SESSION', `Opname sesi ${session.sessionId} di ${session.locationId} (${session.status})`);
     this.save();
-
-    // Async write-back to Google Spreadsheet via Google Apps Script Web App
-    this.postToGasBackend({
-      action: 'SAVE_OPNAME',
-      session,
-      items: items.map((it) => ({
-        assetCode: it.assetCode,
-        barcode: it.barcode,
-        result: it.result,
-        scannedLocationId: it.currentActualLocation,
-        expectedLocationId: it.registeredLocation,
-      })),
-    });
+    this.notifyListeners();
 
     return { success: true, message: 'Sesi opname berhasil disimpan.' };
   }
@@ -812,18 +952,43 @@ class StorageService {
   /**
    * Quick Relocate Misplaced Machine during Opname (A5.4)
    */
-  public resolveOpnameMisplaced(params: {
+  public async resolveOpnameMisplaced(params: {
     assetCode: string;
     targetLocationId: string;
     username: string;
     sessionId: string;
-  }): { success: boolean; message: string } {
+  }): Promise<{ success: boolean; message: string }> {
     const { assetCode, targetLocationId, username, sessionId } = params;
     const machine = this.assetCodeMap.get(assetCode.toUpperCase());
     if (!machine) return { success: false, message: 'Mesin tidak ditemukan.' };
 
     const oldLoc = machine.locationId;
     const now = new Date().toISOString();
+
+    // Wait for server response
+    try {
+      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('MOVE_MACHINE', {
+        assetCode: machine.assetCode,
+        barcode: machine.barcode,
+        locationId: targetLocationId,
+        siteId: machine.siteId,
+        status: machine.status,
+        reason: `Koreksi hasil opname: pindah langsung ke lokasi fisik (${targetLocationId})`,
+      });
+
+      if (!serverRes || !serverRes.success) {
+        return {
+          success: false,
+          message: serverRes?.message || 'Gagal memindahkan mesin di server.',
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke server untuk memindahkan mesin.',
+      };
+    }
+
     machine.locationId = targetLocationId;
     machine.lastMovedAt = now;
     machine.lastMovedBy = username;
@@ -847,19 +1012,7 @@ class StorageService {
 
     this.logAudit(username, 'OPNAME_RESOLVE', `Pindah mesin salah tempat ${assetCode} ke ${targetLocationId}`);
     this.save();
-
-    // Async write-back to Google Spreadsheet via Google Apps Script Web App
-    this.postToGasBackend({
-      action: 'MOVE_MACHINE',
-      assetCode: machine.assetCode,
-      barcode: machine.barcode,
-      locationId: targetLocationId,
-      siteId: machine.siteId,
-      status: machine.status,
-      lastMovedAt: now,
-      lastMovedBy: username,
-      reason: `Koreksi hasil opname: pindah langsung ke lokasi fisik (${targetLocationId})`,
-    });
+    this.notifyListeners();
 
     return { success: true, message: `Mesin ${assetCode} berhasil diperbarui lokasinya ke ${targetLocationId}.` };
   }
@@ -1154,256 +1307,61 @@ class StorageService {
   }
 
   /**
-   * Tarik data langsung dari Google Spreadsheet tab 'machine_asset'
-   * Mendukung koneksi via Google Apps Script Web App maupun Direct Google Sheets CSV Export.
+   * Tarik data langsung dari Google Spreadsheet tab 'machine_asset' via Google Apps Script Backend
+   * Menggunakan helper tunggal postGasApi dengan token sesi aktif.
+   * TIDAK ADA fallback CSV/gviz ataupun penimpaan ke data contoh bila gagal.
    */
   public async syncFromGoogleSheet(
     spreadsheetIdParam?: string,
     sheetName: string = 'machine_asset'
   ): Promise<{ success: boolean; message: string; count: number; source: string; details?: any }> {
-    const spreadsheetId = (spreadsheetIdParam || this.settings.spreadsheetId || '1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio').trim();
-    const gasUrl = (this.settings.gasWebAppUrl || '').trim();
+    const spreadsheetId = (spreadsheetIdParam || this.settings.spreadsheetId || '').trim();
 
-    // 1. Coba Tarik via Google Apps Script Web App jika URL tersedia
-    if (gasUrl) {
-      try {
-        const response = await fetch(`${gasUrl}?action=GET_INITIAL_DATA`, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-        });
-
-        if (response.ok) {
-          const resJson = await response.json();
-          if (resJson && resJson.success && Array.isArray(resJson.machines) && resJson.machines.length > 0) {
-            const mapped = this.mapRawObjectsToMachines(resJson.machines);
-            const merged = this.mergeWithLocalMutations(mapped);
-            this.machines = merged;
-            this.rebuildIndices();
-            this.save();
-            this.logAudit('System', 'GOOGLE_SHEET_SYNC', `Berhasil sinkronisasi ${merged.length} mesin dari Google Apps Script (${resJson.sheetName || sheetName})`);
-            return {
-              success: true,
-              message: `Berhasil menarik ${merged.length} data mesin dari sheet "${resJson.sheetName || sheetName}" via Google Apps Script!`,
-              count: merged.length,
-              source: 'Google Apps Script Web App',
-            };
-          }
-        }
-      } catch (gasErr) {
-        console.warn('Gagal sinkron via Apps Script Web App, mencoba fallback ke Google Sheets CSV Export...', gasErr);
-      }
-    }
-
-    // 2. Fallback: Tarik langsung via Google Sheets GVIZ CSV Export Endpoint
-    if (spreadsheetId) {
-      const candidateSheetNames = [sheetName, 'machine_asset', 'machine_assets', 'Machine_Asset', 'Machines', 'Sheet1'];
-
-      for (const sName of candidateSheetNames) {
-        try {
-          const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sName)}`;
-          const csvRes = await fetch(csvUrl);
-
-          if (csvRes.ok) {
-            const csvText = await csvRes.text();
-            if (csvText && csvText.trim().length > 10) {
-              const rows = this.parseCsv(csvText);
-              if (rows.length > 1) {
-                const mapped = this.mapCsvRowsToMachines(rows);
-                if (mapped.length > 0) {
-                  const merged = this.mergeWithLocalMutations(mapped);
-                  this.machines = merged;
-                  this.rebuildIndices();
-                  this.save();
-                  this.logAudit('System', 'GOOGLE_SHEET_SYNC', `Berhasil sinkronisasi ${merged.length} mesin dari Google Sheets tab "${sName}"`);
-                  return {
-                    success: true,
-                    message: `Berhasil menarik ${merged.length} data mesin langsung dari Google Spreadsheet sheet "${sName}"!`,
-                    count: merged.length,
-                    source: `Google Sheets (Tab: ${sName})`,
-                  };
-                }
-              }
-            }
-          }
-        } catch (csvErr) {
-          console.warn(`Gagal membaca tab "${sName}" via CSV export`, csvErr);
-        }
-      }
-    }
-
-    return {
-      success: false,
-      message: `Tidak dapat mengakses Google Spreadsheet atau sheet "${sheetName}". Pastikan Spreadsheet dibagikan ("Anyone with link can view") atau deploy Google Apps Script dengan akses "Anyone".`,
-      count: 0,
-      source: 'None',
-    };
-  }
-
-  /**
-   * Parser CSV Handal (Menangani koma dalam tanda kutip dan newline)
-   */
-  private parseCsv(text: string): string[][] {
-    const lines: string[][] = [];
-    let row: string[] = [];
-    let inQuotes = false;
-    let currentCell = '';
-
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      const nextChar = text[i + 1];
-
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          currentCell += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        row.push(currentCell.trim());
-        currentCell = '';
-      } else if ((char === '\r' || char === '\n') && !inQuotes) {
-        if (char === '\r' && nextChar === '\n') i++;
-        row.push(currentCell.trim());
-        if (row.some((cell) => cell.length > 0)) {
-          lines.push(row);
-        }
-        row = [];
-        currentCell = '';
-      } else {
-        currentCell += char;
-      }
-    }
-
-    if (currentCell.length > 0 || row.length > 0) {
-      row.push(currentCell.trim());
-      if (row.some((cell) => cell.length > 0)) {
-        lines.push(row);
-      }
-    }
-
-    return lines;
-  }
-
-  /**
-   * Memetakan baris CSV ke Machine Object dengan pencarian nama kolom cerdas
-   */
-  private mapCsvRowsToMachines(rows: string[][]): Machine[] {
-    if (rows.length <= 1) return [];
-
-    const headers = rows[0].map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
-
-    const findIdx = (names: string[]) => {
-      for (const name of names) {
-        const clean = name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const idx = headers.indexOf(clean);
-        if (idx !== -1) return idx;
-      }
-      return -1;
-    };
-
-    const idxAsset = findIdx(['assetcode', 'kodeaset', 'assetno', 'asset', 'code', 'barcode']);
-    const idxBarcode = findIdx(['barcode', 'barcode12', 'kodebarcode', 'barcodeno']);
-    const idxSerial = findIdx(['serial', 'serialnumber', 'noseri', 'serialno', 'sn']);
-    const idxName = findIdx(['standardmachinename', 'machinename', 'namamesin', 'item', 'itemname', 'description', 'jenis']);
-    const idxItem = findIdx(['item', 'koreanname', 'itemkr', 'namaitem']);
-    const idxModel = findIdx(['model', 'tipe', 'modelno', 'type']);
-    const idxMaker = findIdx(['manufacturer', 'maker', 'brand', 'merk', 'pabrikan']);
-    const idxLoc = findIdx(['locationid', 'location', 'lokasi', 'line', 'posisi']);
-    const idxSite = findIdx(['siteid', 'site', 'factory', 'pabrik', 'homefactory']);
-    const idxStatus = findIdx(['status', 'kondisi', 'state']);
-    const idxAcq = findIdx(['acqdate', 'acquisitiondate', 'tanggalperolehan', 'tglperolehan']);
-    const idxPendingTransfer = findIdx(['pendingtransferid', 'pendingtransfer', 'transferid']);
-    const idxLastMovedAt = findIdx(['lastmovedat', 'lastmoved', 'tglpindah']);
-    const idxLastMovedBy = findIdx(['lastmovedby', 'dipindahkanoleh']);
-    const idxLastOpnameAt = findIdx(['lastopnameat', 'tglopname']);
-    const idxStatusSince = findIdx(['statussince', 'statustanggal']);
-    const idxLoanTo = findIdx(['loanto', 'dipinjamkanke']);
-    const idxLoanDueDate = findIdx(['loanduedate', 'tgltenggatpinjam', 'tglkembali']);
-    const idxDataFlag = findIdx(['dataflag', 'flag']);
-    const idxUpdatedAt = findIdx(['updatedat', 'lastupdated', 'tglupdate']);
-    const idxUpdatedBy = findIdx(['updatedby', 'userupdate']);
-    const idxNotes = findIdx(['notes', 'catatan', 'keterangan']);
-
-    const result: Machine[] = [];
-
-    for (let r = 1; r < rows.length; r++) {
-      const row = rows[r];
-      if (!row || row.every((c) => !c || c.trim() === '')) continue;
-
-      const rawAsset = idxAsset !== -1 && row[idxAsset] ? row[idxAsset].trim() : `AST-${r}`;
-      let barcode = idxBarcode !== -1 && row[idxBarcode] ? row[idxBarcode].trim() : rawAsset;
-      barcode = String(barcode).padStart(12, '0');
-
-      const rawSerial = idxSerial !== -1 && row[idxSerial] ? String(row[idxSerial]).trim() : '';
-      const mName = idxName !== -1 && row[idxName] ? row[idxName].trim() : 'Automatic Sewing Machine';
-      const item = idxItem !== -1 && row[idxItem] ? row[idxItem].trim() : mName;
-      const model = idxModel !== -1 && row[idxModel] ? row[idxModel].trim() : '';
-      const maker = idxMaker !== -1 && row[idxMaker] ? row[idxMaker].trim() : '';
-      let loc = idxLoc !== -1 && row[idxLoc] ? row[idxLoc].trim() : 'PW1-UNASSIGNED';
-      let site = idxSite !== -1 && row[idxSite] ? row[idxSite].trim().toUpperCase() : '';
-
-      if (!site && loc) {
-        if (loc.startsWith('PW1')) site = 'PW1';
-        else if (loc.startsWith('PW2')) site = 'PW2';
-        else if (loc.startsWith('PW3')) site = 'PW3';
-        else if (loc.startsWith('WH2')) site = 'WH2';
-        else if (loc.startsWith('SW')) site = 'SW';
-        else if (loc.startsWith('QA')) site = 'QA';
-        else site = 'PW1';
-      }
-
-      if (loc === 'WH2') loc = 'WH2-UNASSIGNED';
-      else if (loc === 'SW') loc = 'SW-MAIN';
-      else if (loc === 'QA') loc = 'QA-MAIN';
-
-      const rawStatus = idxStatus !== -1 && row[idxStatus] ? row[idxStatus].trim().toUpperCase() : 'ACTIVE';
-      let status: any = 'ACTIVE';
-      if (rawStatus.includes('BROKEN') || rawStatus.includes('RUSAK')) status = 'BROKEN';
-      else if (rawStatus.includes('REPAIR') || rawStatus.includes('PERBAIKAN')) status = 'IN_REPAIR';
-      else if (rawStatus.includes('LOAN') || rawStatus.includes('PINJAM')) status = 'LOANED';
-      else if (rawStatus.includes('SOLD') || rawStatus.includes('JUAL') || loc === 'SOLD') status = 'SOLD';
-
-      const pendingTransferId = idxPendingTransfer !== -1 && row[idxPendingTransfer] ? row[idxPendingTransfer].trim() : undefined;
-      const lastMovedAt = idxLastMovedAt !== -1 && row[idxLastMovedAt] ? row[idxLastMovedAt].trim() : undefined;
-      const lastMovedBy = idxLastMovedBy !== -1 && row[idxLastMovedBy] ? row[idxLastMovedBy].trim() : undefined;
-      const lastOpnameAt = idxLastOpnameAt !== -1 && row[idxLastOpnameAt] ? row[idxLastOpnameAt].trim() : undefined;
-      const statusSince = idxStatusSince !== -1 && row[idxStatusSince] ? row[idxStatusSince].trim() : undefined;
-      const loanTo = idxLoanTo !== -1 && row[idxLoanTo] ? row[idxLoanTo].trim() : undefined;
-      const loanDueDate = idxLoanDueDate !== -1 && row[idxLoanDueDate] ? row[idxLoanDueDate].trim() : undefined;
-      const dataFlag = idxDataFlag !== -1 && row[idxDataFlag] ? row[idxDataFlag].trim() : undefined;
-      const updatedAt = idxUpdatedAt !== -1 && row[idxUpdatedAt] ? row[idxUpdatedAt].trim() : new Date().toISOString();
-      const updatedBy = idxUpdatedBy !== -1 && row[idxUpdatedBy] ? row[idxUpdatedBy].trim() : 'GoogleSheets_Sync';
-      const notes = idxNotes !== -1 && row[idxNotes] ? row[idxNotes].trim() : undefined;
-
-      result.push({
-        assetCode: rawAsset,
-        barcode,
-        serial: rawSerial,
-        standardMachineName: mName,
-        item,
-        model,
-        manufacturer: maker,
-        locationId: loc,
-        siteId: site || 'PW1',
-        homeFactory: site || 'PW1',
-        status,
-        acqDate: idxAcq !== -1 && row[idxAcq] ? row[idxAcq].trim() : '2024-01-01',
-        pendingTransferId,
-        lastMovedAt,
-        lastMovedBy,
-        lastOpnameAt,
-        statusSince,
-        loanTo,
-        loanDueDate,
-        dataFlag,
-        updatedAt,
-        updatedBy,
-        notes,
+    try {
+      const resJson = await postGasApi<{
+        success: boolean;
+        machines?: any[];
+        sheetName?: string;
+        message?: string;
+      }>('GET_INITIAL_DATA', {
+        sheetName,
+        spreadsheetId,
       });
-    }
 
-    return result;
+      if (resJson && resJson.success && Array.isArray(resJson.machines)) {
+        const mapped = this.mapRawObjectsToMachines(resJson.machines);
+        const merged = this.mergeWithLocalMutations(mapped);
+        this.machines = merged;
+        this.rebuildIndices();
+        this.save();
+        this.notifyListeners();
+        this.logAudit(
+          'System',
+          'GOOGLE_SHEET_SYNC',
+          `Berhasil sinkronisasi ${merged.length} mesin dari Google Apps Script (${resJson.sheetName || sheetName})`
+        );
+        return {
+          success: true,
+          message: `Berhasil menarik ${merged.length} data mesin dari Google Apps Script backend (${resJson.sheetName || sheetName})!`,
+          count: merged.length,
+          source: 'Google Apps Script Backend',
+        };
+      }
+
+      return {
+        success: false,
+        message: resJson?.message || 'Gagal menyinkronkan data dari Google Apps Script backend.',
+        count: 0,
+        source: 'Google Apps Script Backend',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Tidak dapat terhubung ke Google Apps Script backend.',
+        count: 0,
+        source: 'Google Apps Script Backend',
+      };
+    }
   }
 
   /**
@@ -1493,22 +1451,17 @@ class StorageService {
   }
 
   /**
-   * Mengirim mutasi langsung secara real-time ke Google Apps Script Web App (doPost)
+   * Mengirim mutasi / request langsung ke Google Apps Script Web App lewat helper tunggal postGasApi
    */
-  public async postToGasBackend(payload: any) {
-    const gasUrl = (this.settings.gasWebAppUrl || '').trim();
-    if (!gasUrl) return;
-
-    try {
-      await fetch(gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-        mode: 'no-cors',
-      });
-      console.log('Real-time writeback sent to Google Apps Script:', payload.action);
-    } catch (err) {
-      console.warn('Gagal mengirim update real-time ke Google Apps Script:', err);
+  public async postToGasBackend<T = any>(
+    actionOrPayload: string | { action: string; [key: string]: any; params?: any },
+    maybeParams?: any
+  ): Promise<T> {
+    if (typeof actionOrPayload === 'string') {
+      return await postGasApi<T>(actionOrPayload, maybeParams || {});
+    } else {
+      const { action, params, ...rest } = actionOrPayload;
+      return await postGasApi<T>(action, params || rest);
     }
   }
 

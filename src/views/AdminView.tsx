@@ -17,36 +17,21 @@ import {
   Copy,
   Download,
   Upload,
-  Palette,
-  LayoutTemplate,
-  Sparkles,
-  Check,
   Trash2,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
-import { useTheme } from '../services/themeContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
 import { generateGasCodeGs } from '../services/gasExporter';
+import { gasAuthService, getGasBaseUrl } from '../services/gasAuthService';
 import { Site, Location, Rack, User, UserRole, AppSettings } from '../types';
 
 export const AdminView: React.FC = () => {
   const { currentUser, language } = useAuth();
-  const {
-    themePreset,
-    setThemePreset,
-    layoutStyle,
-    setLayoutStyle,
-    accentColor,
-    setAccentColor,
-    cardRadius,
-    setCardRadius,
-    isSageEmerald,
-  } = useTheme();
 
   const [activeSection, setActiveSection] = useState<
-    'cleaning' | 'sites' | 'racks' | 'users' | 'settings' | 'gas_export' | 'import_export'
+    'cleaning' | 'sites' | 'racks' | 'users' | 'gas_export' | 'import_export'
   >('cleaning');
 
   // Bagian C Audit results
@@ -77,10 +62,6 @@ export const AdminView: React.FC = () => {
 
   const [spreadsheetId, setSpreadsheetId] = useState(
     settings.spreadsheetId || '1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio'
-  );
-  const [gasUrl, setGasUrl] = useState(
-    settings.gasWebAppUrl ||
-      'https://script.google.com/macros/s/AKfycbwEAUtA4OH5MT2uAdVgQ4rSaJ-747ETBvyjDFn_oPp9RsmzKl0AG4k4ZRxeh90TyAzZ/exec'
   );
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'SUCCESS' | 'ERROR'>('IDLE');
@@ -127,29 +108,34 @@ export const AdminView: React.FC = () => {
     }
   };
 
-  // Test GAS Web App Connection & Save Settings
+  // Test GAS Web App Connection via PING & Save Spreadsheet ID
   const handleTestGasConnection = async () => {
     setTestingConnection(true);
     setConnectionStatus('IDLE');
-    setConnectionMsg('Menyimpan konfigurasi & menguji endpoint Google Apps Script Web App...');
+    setConnectionMsg('Menguji konektivitas server Google Apps Script (PING)...');
 
     try {
-      // Save to local settings
+      // Save spreadsheet ID to local settings
       storageService.updateSettings({
         ...settings,
         spreadsheetId: spreadsheetId.trim(),
-        gasWebAppUrl: gasUrl.trim(),
       });
 
-      // Quick test fetch
-      if (gasUrl.trim()) {
-        await fetch(gasUrl.trim(), { mode: 'no-cors' });
+      const res = await gasAuthService.ping();
+      if (res && res.success) {
+        setConnectionStatus('SUCCESS');
+        setConnectionMsg(
+          `Koneksi Berhasil! Version: ${res.version || 'v1.0'}${
+            res.timestamp ? ` (Waktu Server: ${res.timestamp})` : ''
+          }`
+        );
+      } else {
+        setConnectionStatus('ERROR');
+        setConnectionMsg(res?.message || 'Server Google Apps Script tidak merespons PING.');
       }
-      setConnectionStatus('SUCCESS');
-      setConnectionMsg('Konfigurasi berhasil disimpan! Spreadsheet ID & Web App Endpoint aktif.');
     } catch (err: any) {
-      setConnectionStatus('SUCCESS');
-      setConnectionMsg('Konfigurasi tersimpan dan siap beroperasi dengan Google Spreadsheet.');
+      setConnectionStatus('ERROR');
+      setConnectionMsg(`Gagal terhubung ke server: ${err.message || 'Error jaringan'}`);
     } finally {
       setTestingConnection(false);
     }
@@ -319,16 +305,6 @@ export const AdminView: React.FC = () => {
         >
           <Code className="w-3.5 h-3.5 inline mr-1.5" />
           <span>Google Apps Script</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSection('settings')}
-          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
-            activeSection === 'settings' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-          }`}
-        >
-          <Palette className="w-3.5 h-3.5 inline mr-1.5" />
-          <span>Pengaturan Tema & Tampilan</span>
         </button>
       </div>
 
@@ -799,30 +775,29 @@ export const AdminView: React.FC = () => {
               </div>
             </div>
 
-            {/* Google Apps Script Web App URL */}
+            {/* Google Apps Script Web App URL from Environment */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-700">
-                Google Apps Script Web App Deployment URL:
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-700">
+                  Google Apps Script Web App URL (Environment Variable):
+                </label>
+                <span className="text-[10px] font-mono text-slate-500 font-semibold">VITE_GAS_URL</span>
+              </div>
               <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="url"
-                  value={gasUrl}
-                  onChange={(e) => setGasUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-800 font-mono focus:outline-none focus:border-indigo-500"
-                />
+                <div className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 break-all select-all font-semibold">
+                  {getGasBaseUrl() || 'Belum dikonfigurasi di file .env (VITE_GAS_URL)'}
+                </div>
                 <button
                   onClick={handleTestGasConnection}
                   disabled={testingConnection}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold whitespace-nowrap flex items-center justify-center gap-1.5 shadow-sm"
                 >
                   {testingConnection ? (
-                    <span>Menyimpan & Menguji...</span>
+                    <span>Menguji (PING)...</span>
                   ) : (
                     <>
                       <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                      <span>Simpan & Verifikasi Endpoint</span>
+                      <span>Uji Koneksi (PING)</span>
                     </>
                   )}
                 </button>
@@ -834,11 +809,15 @@ export const AdminView: React.FC = () => {
                 className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
                   connectionStatus === 'SUCCESS'
                     ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
-                    : 'bg-blue-50 text-blue-800 border border-blue-300'
+                    : 'bg-rose-50 text-rose-800 border border-rose-300'
                 }`}
               >
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>{connectionMsg}</span>
+                {connectionStatus === 'SUCCESS' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                )}
+                <span className="font-semibold">{connectionMsg}</span>
               </div>
             )}
           </div>
@@ -939,282 +918,6 @@ export const AdminView: React.FC = () => {
 
           <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 max-h-96 overflow-y-auto font-mono text-xs text-cyan-300 shadow-inner">
             <pre>{generateGasCodeGs(spreadsheetId)}</pre>
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 7: THEME & UI APPEARANCE SETTINGS */}
-      {activeSection === 'settings' && (
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-8">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center">
-                <Palette className="w-4 h-4" />
-              </div>
-              <h2 className="text-base font-extrabold text-slate-900">
-                Pengaturan Tema & Tata Letak Antarmuka
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Sesuaikan tampilan antarmuka visual aplikasi, warna tema, serta tata letak navigasi (Sidebar vertikal vs Header atas) sesuai kebutuhan operasional PT.WINNERS.
-            </p>
-          </div>
-
-          {/* 1. Theme Presets */}
-          <div className="space-y-3">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>1. Pilihan Tema Tampilan (Theme Presets)</span>
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Sage Green & Dark Emerald (Image Reference) */}
-              <div
-                onClick={() => setThemePreset('sage_emerald')}
-                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
-                  themePreset === 'sage_emerald'
-                    ? 'border-emerald-600 bg-emerald-50/70 shadow-md ring-2 ring-emerald-500/20'
-                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-[#064e3b] border border-emerald-400" />
-                    <div className="w-4 h-4 rounded-full bg-[#edf3ef] border border-emerald-600" />
-                  </div>
-                  {themePreset === 'sage_emerald' && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>Aktif</span>
-                    </span>
-                  )}
-                </div>
-                <div className="font-extrabold text-sm text-slate-900">Sage & Forest Emerald</div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Sesuai desain referensi gambar: Latar sage lembut, sidebar/header hijau tua elegan, kartu bersih dan kontras tajam.
-                </p>
-                <div className="mt-2.5 inline-block text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  ★ Rekomendasi Gambar
-                </div>
-              </div>
-
-              {/* Dark Slate Industrial */}
-              <div
-                onClick={() => setThemePreset('dark_slate')}
-                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
-                  themePreset === 'dark_slate'
-                    ? 'border-blue-600 bg-blue-50/70 shadow-md ring-2 ring-blue-500/20'
-                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-slate-950 border border-slate-700" />
-                    <div className="w-4 h-4 rounded-full bg-blue-600" />
-                  </div>
-                  {themePreset === 'dark_slate' && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>Aktif</span>
-                    </span>
-                  )}
-                </div>
-                <div className="font-extrabold text-sm text-slate-900">Dark Slate Industrial</div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Nuansa gelap modern dengan kontras tinggi untuk pemakaian di lingkungan pabrik dan pencahayaan redup.
-                </p>
-              </div>
-
-              {/* Clean Light Modern */}
-              <div
-                onClick={() => setThemePreset('clean_light')}
-                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
-                  themePreset === 'clean_light'
-                    ? 'border-emerald-600 bg-emerald-50/70 shadow-md ring-2 ring-emerald-500/20'
-                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-white border border-slate-300" />
-                    <div className="w-4 h-4 rounded-full bg-emerald-500" />
-                  </div>
-                  {themePreset === 'clean_light' && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>Aktif</span>
-                    </span>
-                  )}
-                </div>
-                <div className="font-extrabold text-sm text-slate-900">Clean Light Modern</div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Tampilan terang putih minimalis dengan aksen hijau emerald untuk kejelasan data di kantor/ruangan terang.
-                </p>
-              </div>
-
-              {/* Midnight Navy */}
-              <div
-                onClick={() => setThemePreset('midnight_navy')}
-                className={`cursor-pointer p-4 rounded-2xl border-2 transition-all relative ${
-                  themePreset === 'midnight_navy'
-                    ? 'border-cyan-600 bg-cyan-50/70 shadow-md ring-2 ring-cyan-500/20'
-                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-[#0b132b] border border-cyan-500/40" />
-                    <div className="w-4 h-4 rounded-full bg-cyan-400" />
-                  </div>
-                  {themePreset === 'midnight_navy' && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-600 text-white flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>Aktif</span>
-                    </span>
-                  )}
-                </div>
-                <div className="font-extrabold text-sm text-slate-900">Midnight Navy</div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Latar biru dongker malam dengan aksen cyan neon futuristik yang nyaman di mata.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* 2. Layout Style: Sidebar vs Topbar */}
-          <div className="space-y-3">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-              <LayoutTemplate className="w-3.5 h-3.5 text-blue-600" />
-              <span>2. Pengaturan Header Utama & Tata Letak Navigasi (Layout Mode)</span>
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Sidebar Left Layout */}
-              <div
-                onClick={() => setLayoutStyle('sidebar')}
-                className={`cursor-pointer p-5 rounded-2xl border-2 transition-all ${
-                  layoutStyle === 'sidebar'
-                    ? 'border-emerald-600 bg-emerald-50/70 shadow-md ring-2 ring-emerald-500/20'
-                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                    <div className="w-3 h-6 rounded bg-emerald-600" />
-                    <span>Sidebar Vertikal Sisi Kiri</span>
-                  </div>
-                  {layoutStyle === 'sidebar' && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>Aktif</span>
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-600">
-                  Persis seperti pada gambar referensi: Menu navigasi vertikal di kiri dengan logo kotak hijau tua, shortcut pemindai QR cepat, dan profil pengguna di bagian bawah.
-                </p>
-              </div>
-
-              {/* Topbar Layout */}
-              <div
-                onClick={() => setLayoutStyle('topbar')}
-                className={`cursor-pointer p-5 rounded-2xl border-2 transition-all ${
-                  layoutStyle === 'topbar'
-                    ? 'border-blue-600 bg-blue-50/70 shadow-md ring-2 ring-blue-500/20'
-                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                    <div className="w-6 h-3 rounded bg-blue-600" />
-                    <span>Header Atas (Top Navigation Bar)</span>
-                  </div>
-                  {layoutStyle === 'topbar' && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>Aktif</span>
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-600">
-                  Navigasi horizontal di bagian atas layar dengan nuansa warna hijau zamrud yang seragam dan ruang kerja halaman penuh.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Accent Color Picker */}
-          <div className="space-y-3">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              3. Pilihan Warna Aksen (Accent Palette)
-            </label>
-            <div className="flex flex-wrap gap-3">
-              {[
-                { id: 'emerald', name: 'Emerald Forest (Hijau Zamrud)', bg: 'bg-emerald-500' },
-                { id: 'teal', name: 'Mint Teal (Hijau Mint)', bg: 'bg-teal-500' },
-                { id: 'indigo', name: 'Indigo Royal', bg: 'bg-indigo-500' },
-                { id: 'blue', name: 'Electric Blue', bg: 'bg-blue-500' },
-                { id: 'amber', name: 'Amber Gold', bg: 'bg-amber-500' },
-              ].map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setAccentColor(c.id as any)}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all ${
-                    accentColor === c.id
-                      ? 'border-emerald-600 bg-emerald-50 text-emerald-900 shadow-sm ring-1 ring-emerald-500/20'
-                      : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900 hover:border-slate-300'
-                  }`}
-                >
-                  <div className={`w-3.5 h-3.5 rounded-full ${c.bg}`} />
-                  <span>{c.name}</span>
-                  {accentColor === c.id && <Check className="w-3 h-3 text-emerald-600" />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 4. Live Component Preview Card */}
-          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
-            <div className="text-xs font-bold text-slate-700 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-emerald-600" />
-              <span>Pratinjau Langsung Komponen UI (Live Preview):</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Sample Card */}
-              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-2">
-                <div className="text-[11px] font-extrabold text-emerald-700">STATUS MESIN CONTOH</div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-bold text-slate-900">IDN-8-2009-1396</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    ACTIVE
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500">JUKI • DDL-8700-7 • PW1-L05</div>
-              </div>
-
-              {/* Sample Buttons */}
-              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-2">
-                <div className="text-[11px] font-extrabold text-slate-700">TOMBOL AKSI CEPAT</div>
-                <div className="flex gap-2">
-                  <button className="flex-1 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-[11px] shadow-sm">
-                    Pindah Mesin
-                  </button>
-                  <button className="flex-1 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-bold text-[11px]">
-                    Transfer
-                  </button>
-                </div>
-              </div>
-
-              {/* Sample Badge */}
-              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-2">
-                <div className="text-[11px] font-extrabold text-slate-700">PABRIK & LOKASI</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 font-bold">
-                    PW1 FACTORY
-                  </span>
-                  <span className="text-[10px] font-mono text-emerald-700 font-bold">Line 12</span>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       )}

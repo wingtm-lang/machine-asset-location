@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <clipPath id="circle-clip">
+      <circle cx="250" cy="250" r="235" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#circle-clip)">
+    <!-- Outer Ring Base (Blue) -->
+    <circle cx="250" cy="250" r="210" fill="none" stroke="#0072ce" stroke-width="50" />
+    
+    <!-- Top Vertical Stem (Merging with top circle) -->
+    <path d="M 225,15 L 275,15 L 275,120 L 225,120 Z" fill="#0072ce" />
+    
+    <!-- Upper Curved Arch Band -->
+    <path d="M 275,80 C 340,110 420,165 485,195 L 475,245 C 410,215 330,160 250,115 C 170,160 90,215 25,245 L 15,195 C 80,165 160,110 225,80 Z" fill="#0072ce" />
+
+    <!-- Center Gap between arches is cut by white curve -->
+    <!-- Lower Central Stem -->
+    <path d="M 225,190 L 275,190 L 275,290 L 225,290 Z" fill="#0072ce" />
+
+    <!-- Lower Curved Arch Band -->
+    <path d="M 275,260 C 340,310 400,370 440,420 L 395,455 C 360,410 310,360 250,290 C 190,360 140,410 105,455 L 60,420 C 100,370 160,310 225,260 Z" fill="#0072ce" />
+  </g>
+</svg>
