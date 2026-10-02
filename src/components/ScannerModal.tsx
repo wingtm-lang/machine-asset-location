@@ -16,6 +16,7 @@ import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 import { Machine } from '../types';
+import { getMachineLabel } from '../utils/machineName';
 
 interface ScannerModalProps {
   isOpen: boolean;
@@ -370,7 +371,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                   <span className="font-bold text-slate-900 text-sm">
-                    {scannedMachine.standardMachineName}
+                    {getMachineLabel(scannedMachine).primary}
                   </span>
                 </div>
                 <span

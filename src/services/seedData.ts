@@ -288,29 +288,30 @@ interface MachineModelTemplate {
   itemKr: string;
   manufacturer: string;
   model: string;
+  localName?: string;
 }
 
 const MACHINE_TEMPLATES: MachineModelTemplate[] = [
-  { name: '1-Needle Lockstitch Machine', itemKr: '본봉자동', manufacturer: 'JUKI', model: 'DDL-8700-7' },
-  { name: '1-Needle Lockstitch Machine Direct Drive', itemKr: '본봉자동', manufacturer: 'JUKI', model: 'DDL-9000C-FMS' },
-  { name: '1-Needle Lockstitch with Electronic Feed', itemKr: '본봉직결', manufacturer: 'BROTHER', model: 'S-7300A-403P' },
-  { name: '2-Needle Lockstitch Machine', itemKr: '쌍침자동', manufacturer: 'BROTHER', model: 'T-8422C-003' },
-  { name: '3-Thread Overlock Machine', itemKr: '오버록 (3침)', manufacturer: 'PEGASUS', model: 'EXT3216-03/233' },
-  { name: '4-Thread Super High Speed Overlock Machine', itemKr: '오버록 (4침)', manufacturer: 'JUKI', model: 'MO-6814S' },
-  { name: '5-Thread Safety Stitch Machine', itemKr: '인터록 (5침)', manufacturer: 'SIRUBA', model: '757K-516M2-35' },
-  { name: 'Flatlock / Interlock Cylinder Bed Machine', itemKr: '삼봉 (플랫락)', manufacturer: 'YAMATO', model: 'VC2700-156M' },
-  { name: 'Flatbed Top and Bottom Coverstitch Machine', itemKr: '삼봉평상', manufacturer: 'PEGASUS', model: 'W562PV-01GB' },
-  { name: 'Electronic Bar Tacking Machine', itemKr: '바텍 (전자)', manufacturer: 'JUKI', model: 'LK-1900BN-SS' },
-  { name: 'Computer-controlled Buttonhole Machine', itemKr: '나나인치 (단추구멍)', manufacturer: 'JUKI', model: 'LBH-1790AN' },
-  { name: 'Eyelet Buttonhole Machine', itemKr: '큐큐 (아이렛)', manufacturer: 'BROTHER', model: 'RH-9820-01' },
-  { name: 'Electronic Button Attaching Machine', itemKr: '단추달이 (전자)', manufacturer: 'JUKI', model: 'MB-1800B' },
-  { name: 'Automatic Placket Attaching Machine', itemKr: '플라켓 자동부착기', manufacturer: 'JACK', model: 'JK-T9820' },
-  { name: 'Multi-Needle Elastic Waistband Machine', itemKr: '오비 (밴드부착)', manufacturer: 'KANSAI SPECIAL', model: 'FBX-1104P' },
-  { name: 'Programmable Pattern Sewing Machine', itemKr: '전자패턴기', manufacturer: 'MITSUBISHI', model: 'PLK-G2010R' },
-  { name: 'Automatic Pocket Welting Machine', itemKr: '주머니 자동봉제기', manufacturer: 'JUKI', model: 'APW-895' },
-  { name: 'Hot Air Seam Sealing Machine', itemKr: '심실링기', manufacturer: 'SEAMTEK', model: 'ST-800' },
-  { name: 'Straight Knife Cloth Cutting Machine', itemKr: '재단기', manufacturer: 'EASTMAN', model: '629X Blue Streak' },
-  { name: 'Continuous Fusing Press Machine', itemKr: '접착기', manufacturer: 'HASHIMA', model: 'HP-450MS' },
+  { name: '1-Needle Lockstitch Machine', itemKr: '본봉자동', manufacturer: 'JUKI', model: 'DDL-8700-7', localName: 'Jarum 1 Otomatis' },
+  { name: '1-Needle Lockstitch Machine Direct Drive', itemKr: '본봉자동', manufacturer: 'JUKI', model: 'DDL-9000C-FMS', localName: 'Jarum 1 Direct Drive' },
+  { name: '1-Needle Lockstitch with Electronic Feed', itemKr: '본봉직결', manufacturer: 'BROTHER', model: 'S-7300A-403P', localName: 'Jarum 1 Elektronik' },
+  { name: '2-Needle Lockstitch Machine', itemKr: '쌍침자동', manufacturer: 'BROTHER', model: 'T-8422C-003', localName: 'Jarum 2 / Dobel Jarum' },
+  { name: '3-Thread Overlock Machine', itemKr: '오버록 (3침)', manufacturer: 'PEGASUS', model: 'EXT3216-03/233', localName: 'Obras 3 Benang' },
+  { name: '4-Thread Super High Speed Overlock Machine', itemKr: '오버록 (4침)', manufacturer: 'JUKI', model: 'MO-6814S', localName: 'Obras 4 Benang' },
+  { name: '5-Thread Safety Stitch Machine', itemKr: '인터록 (5침)', manufacturer: 'SIRUBA', model: '757K-516M2-35', localName: 'Interlock / Obras 5 Benang' },
+  { name: 'Flatlock / Interlock Cylinder Bed Machine', itemKr: '삼봉 (플랫락)', manufacturer: 'YAMATO', model: 'VC2700-156M', localName: 'Kansai / Overdeck Corong' },
+  { name: 'Flatbed Top and Bottom Coverstitch Machine', itemKr: '삼봉평상', manufacturer: 'PEGASUS', model: 'W562PV-01GB', localName: 'Kansai / Overdeck Flatbed' },
+  { name: 'Electronic Bar Tacking Machine', itemKr: '바텍 (전자)', manufacturer: 'JUKI', model: 'LK-1900BN-SS', localName: 'Bartek (Bartack) Elektronik' },
+  { name: 'Computer-controlled Buttonhole Machine', itemKr: '나나인치 (단추구멍)', manufacturer: 'JUKI', model: 'LBH-1790AN', localName: 'Lobang Kancing (Nanainchi)' },
+  { name: 'Eyelet Buttonhole Machine', itemKr: '큐큐 (아이렛)', manufacturer: 'BROTHER', model: 'RH-9820-01', localName: 'Lobang Kancing Jas (QQ)' },
+  { name: 'Electronic Button Attaching Machine', itemKr: '단추달이 (전자)', manufacturer: 'JUKI', model: 'MB-1800B', localName: 'Pasang Kancing Elektronik' },
+  { name: 'Automatic Placket Attaching Machine', itemKr: '플라켓 자동부착기', manufacturer: 'JACK', model: 'JK-T9820', localName: 'Plaket Otomatis' },
+  { name: 'Multi-Needle Elastic Waistband Machine', itemKr: '오비 (밴드부착)', manufacturer: 'KANSAI SPECIAL', model: 'FBX-1104P', localName: 'Kansai Karet / Obi' },
+  { name: 'Programmable Pattern Sewing Machine', itemKr: '전자패턴기', manufacturer: 'MITSUBISHI', model: 'PLK-G2010R', localName: 'Pattern Sew / Pola Otomatis' },
+  { name: 'Automatic Pocket Welting Machine', itemKr: '주머니 자동봉제기', manufacturer: 'JUKI', model: 'APW-895', localName: 'Bobok Kantong Otomatis' },
+  { name: 'Hot Air Seam Sealing Machine', itemKr: '심실링기', manufacturer: 'SEAMTEK', model: 'ST-800', localName: 'Seam Sealing / Press Panas' },
+  { name: 'Straight Knife Cloth Cutting Machine', itemKr: '재단기', manufacturer: 'EASTMAN', model: '629X Blue Streak', localName: 'Mesin Potong / Cutting Tegak' },
+  { name: 'Continuous Fusing Press Machine', itemKr: '접착기', manufacturer: 'HASHIMA', model: 'HP-450MS', localName: 'Fusing Press / Mesin Interlining' },
 ];
 
 /**
@@ -423,6 +424,7 @@ export function generateMachineDataset(): { machines: Machine[]; movements: Move
       homeFactory,
       acqDate: `20${18 + (i % 8)}-${String((i % 12) + 1).padStart(2, '0')}-15`,
       standardMachineName: tmpl.name,
+      localName: tmpl.localName,
       serial,
       manufacturer: tmpl.manufacturer,
       model: tmpl.model,

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Building2,
   Boxes,
@@ -19,16 +19,58 @@ import {
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
-import { Machine, SiteId } from '../types';
+import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
+import { Machine, SiteId, MachineStatus, MachineListFilter } from '../types';
+import { PtWinnersLogo } from '../components/PtWinnersLogo';
 
 interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
+  onOpenMachines: (filter: MachineListFilter) => void;
   onSelectMachine: (machine: Machine) => void;
   onOpenScanner: () => void;
 }
 
+const STATUS_PILLS = [
+  { key: 'ACTIVE',     box: 'bg-emerald-50 border-emerald-200', title: 'text-emerald-800', num: 'text-emerald-950' },
+  { key: 'IN_TRANSIT', box: 'bg-sky-50 border-sky-200',         title: 'text-sky-800',     num: 'text-sky-950' },
+  { key: 'IN_REPAIR',  box: 'bg-amber-50 border-amber-200',     title: 'text-amber-800',   num: 'text-amber-950' },
+  { key: 'BROKEN',     box: 'bg-rose-50 border-rose-200',       title: 'text-rose-800',    num: 'text-rose-950' },
+  { key: 'LOANED',     box: 'bg-purple-50 border-purple-200',   title: 'text-purple-800',  num: 'text-purple-950' },
+  { key: 'SOLD',       box: 'bg-slate-100 border-slate-200',    title: 'text-slate-700',   num: 'text-slate-900' },
+] as const;
+
+const CARD_BTN =
+  'text-left w-full cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 hover:border-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500';
+
+function formatWibTimestamp(timestampStr: string): string {
+  if (!timestampStr) return '-';
+  try {
+    // Parse timestamp sebagai WIB: new Date(timestamp.replace(' ', 'T') + '+07:00')
+    const date = new Date(timestampStr.replace(' ', 'T') + '+07:00');
+    if (isNaN(date.getTime())) return timestampStr;
+
+    const now = new Date();
+    const isToday =
+      date.getDate() === now.getDate() &&
+      date.getMonth() === now.getMonth() &&
+      date.getFullYear() === now.getFullYear();
+
+    if (isToday) {
+      return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    } else {
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = date.toLocaleString('id-ID', { month: 'short' });
+      const time = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      return `${day} ${month} ${time}`;
+    }
+  } catch {
+    return timestampStr;
+  }
+}
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateTab,
+  onOpenMachines,
   onSelectMachine,
   onOpenScanner,
 }) => {
@@ -37,7 +79,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const sites = storageService.getSites();
   const transfers = storageService.getTransfers();
   const opnameSessions = storageService.getOpnameSessions();
-  const movements = storageService.getMovements();
+
+  // Server Movements State
+  const [serverMovements, setServerMovements] = useState<ServerMovementRecord[]>([]);
+  const [isLoadingMovements, setIsLoadingMovements] = useState<boolean>(true);
+  const [movementsError, setMovementsError] = useState<string | null>(null);
+
+  const fetchRecentMovements = useCallback(async () => {
+    setIsLoadingMovements(true);
+    setMovementsError(null);
+    try {
+      const res = await gasAuthService.getMovements({ limit: 5 });
+      if (res && res.success) {
+        setServerMovements(Array.isArray(res.movements) ? res.movements.slice(0, 5) : []);
+      } else {
+        setMovementsError(res?.message || 'Gagal memuat riwayat mutasi dari server.');
+      }
+    } catch (err: any) {
+      setMovementsError(err.message || 'Tidak dapat terhubung ke server.');
+    } finally {
+      setIsLoadingMovements(false);
+    }
+  }, []);
+
+  // Fetch on mount
+  useEffect(() => {
+    fetchRecentMovements();
+  }, [fetchRecentMovements]);
+
+  // Auto reload every 60 seconds only when tab is visible
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchRecentMovements();
+      }
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [fetchRecentMovements]);
 
   // Live Sync state
   const [isSyncing, setIsSyncing] = useState(false);
@@ -60,6 +139,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       setTimeout(() => setSyncToast(null), 5000);
     } finally {
       setIsSyncing(false);
+      fetchRecentMovements();
     }
   };
 
@@ -96,11 +176,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Status breakdown
   const statusCounts = useMemo(() => {
-    const counts = { ACTIVE: 0, BROKEN: 0, IN_REPAIR: 0, LOANED: 0, SOLD: 0 };
+    const counts: Record<MachineStatus, number> = {
+      ACTIVE: 0, IN_TRANSIT: 0, IN_REPAIR: 0, BROKEN: 0, LOANED: 0, SOLD: 0,
+    };
     for (const m of accessibleMachines) {
-      if (counts[m.status] !== undefined) {
-        counts[m.status]++;
-      }
+      if (counts[m.status] !== undefined) counts[m.status]++;
     }
     return counts;
   }, [accessibleMachines]);
@@ -137,7 +217,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-sky-100 bg-white/15 px-2.5 py-0.5 rounded-full border border-white/20">
+              <span className="text-xs font-bold uppercase tracking-wider text-sky-100 bg-white/15 px-2.5 py-0.5 rounded-full border border-white/20 flex items-center gap-1.5">
+                <PtWinnersLogo className="w-3.5 h-3.5 object-contain" />
                 PT.WINNERS Asset System
               </span>
               <span className="text-xs text-sky-100/80 font-mono">
@@ -269,7 +350,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* TOP STATS CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1">
+        {/* Total */}
+        <button
+          type="button"
+          onClick={() => onOpenMachines({ status: 'ALL', site: 'ALL' })}
+          className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
+        >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
             <span>Total Mesin Dikelola</span>
             <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -282,9 +368,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="text-[11px] text-slate-500">
             Dari total {machines.length.toLocaleString()} aset perusahaan
           </div>
-        </div>
+        </button>
 
-        <div className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1">
+        {/* Aktif */}
+        <button
+          type="button"
+          onClick={() => onOpenMachines({ status: 'ACTIVE' })}
+          className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
+        >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
             <span>Mesin Aktif (Operasi)</span>
             <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -297,9 +388,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="text-[11px] text-emerald-700 font-medium">
             {((statusCounts.ACTIVE / (accessibleMachines.length || 1)) * 100).toFixed(1)}% Operasional
           </div>
-        </div>
+        </button>
 
-        <div className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1">
+        {/* In Transit: angka diganti agar cocok dengan isi tabel */}
+        <button
+          type="button"
+          onClick={() => onOpenMachines({ status: 'IN_TRANSIT' })}
+          className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
+        >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
             <span>In Transit / Transfer</span>
             <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
@@ -307,14 +403,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="text-2xl sm:text-3xl font-black text-amber-700 font-mono">
-            {inTransitTransfers.length}
+            {statusCounts.IN_TRANSIT.toLocaleString()}
           </div>
           <div className="text-[11px] text-amber-700">
             {overdueTransfers.length > 0 ? `${overdueTransfers.length} terlambat` : 'Semua tepat waktu'}
           </div>
-        </div>
+        </button>
 
-        <div className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1">
+        {/* Perbaikan & Rusak */}
+        <button
+          type="button"
+          onClick={() => onOpenMachines({ status: 'BROKEN_REPAIR' })}
+          className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
+        >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
             <span>Perbaikan & Rusak</span>
             <div className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
@@ -327,7 +428,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="text-[11px] text-slate-500">
             {statusCounts.IN_REPAIR} Diperbaiki • {statusCounts.BROKEN} Rusak
           </div>
-        </div>
+        </button>
       </div>
 
       {/* SITES DISTRIBUTION GRID */}
@@ -347,11 +448,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             return (
               <button
                 key={site.siteId}
-                onClick={() => onNavigateTab(site.siteId === 'WH2' ? 'rackmap' : 'machines')}
+                type="button"
+                disabled={!hasAccess}
+                onClick={() => onOpenMachines({ site: site.siteId, status: 'ALL' })}
                 className={`p-4 rounded-2xl border text-left transition-all hover:scale-[1.02] shadow-xs ${
                   hasAccess
-                    ? 'bg-white border-slate-200/90 hover:border-emerald-500 hover:bg-emerald-50/30'
-                    : 'bg-slate-50 border-slate-200 opacity-60'
+                    ? 'bg-white border-slate-200/90 hover:border-emerald-500 hover:bg-emerald-50/30 cursor-pointer'
+                    : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -386,7 +489,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {machineTypeCounts.map(([name, count]) => {
               const pct = ((count / (accessibleMachines.length || 1)) * 100).toFixed(1);
               return (
-                <div key={name} className="space-y-1">
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => onOpenMachines({ typeName: name, status: 'ALL', site: 'ALL' })}
+                  className="block w-full text-left space-y-1 rounded-lg p-1 -m-1 hover:bg-slate-50 cursor-pointer"
+                >
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-800 font-medium truncate max-w-[280px]">{name}</span>
                     <span className="font-mono font-bold text-slate-900">
@@ -399,7 +507,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -415,76 +523,141 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h3>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <div className="text-emerald-800 font-bold">ACTIVE</div>
-                <div className="text-xl font-bold text-emerald-950 font-mono mt-1">
-                  {statusCounts.ACTIVE.toLocaleString()}
-                </div>
-              </div>
-
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                <div className="text-amber-800 font-bold">IN_REPAIR</div>
-                <div className="text-xl font-bold text-amber-950 font-mono mt-1">
-                  {statusCounts.IN_REPAIR.toLocaleString()}
-                </div>
-              </div>
-
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
-                <div className="text-rose-800 font-bold">BROKEN</div>
-                <div className="text-xl font-bold text-rose-950 font-mono mt-1">
-                  {statusCounts.BROKEN.toLocaleString()}
-                </div>
-              </div>
-
-              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl">
-                <div className="text-purple-800 font-bold">LOANED</div>
-                <div className="text-xl font-bold text-purple-950 font-mono mt-1">
-                  {statusCounts.LOANED.toLocaleString()}
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl">
-                <div className="text-slate-700 font-bold">SOLD</div>
-                <div className="text-xl font-bold text-slate-900 font-mono mt-1">
-                  {statusCounts.SOLD.toLocaleString()}
-                </div>
-              </div>
+              {STATUS_PILLS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => onOpenMachines({ status: p.key })}
+                  className={`p-3 rounded-xl border text-left transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer ${p.box}`}
+                >
+                  <div className={`font-bold ${p.title}`}>{p.key}</div>
+                  <div className={`text-xl font-bold font-mono mt-1 ${p.num}`}>
+                    {statusCounts[p.key].toLocaleString()}
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Recent Movements Preview */}
-          <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-3">
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-700" />
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
                 <span>Aktivitas Mutasi Terkini</span>
               </h3>
               <button
-                onClick={() => onNavigateTab('machines')}
-                className="text-xs text-emerald-700 hover:text-emerald-800 font-bold"
+                type="button"
+                onClick={() => onNavigateTab('history')}
+                className="text-xs text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 font-bold transition-colors cursor-pointer"
               >
                 Lihat Semua
               </button>
             </div>
 
-            <div className="space-y-2">
-              {movements.slice(0, 4).map((mov) => (
-                <div
-                  key={mov.movementId}
-                  className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between gap-2"
-                >
-                  <div className="space-y-0.5 truncate">
-                    <div className="font-mono font-bold text-emerald-700">{mov.assetCode}</div>
-                    <div className="text-slate-700 truncate">
-                      {mov.fromLocation} → <span className="text-emerald-700 font-bold">{mov.toLocation}</span>
+            {/* Skeleton state (5 lines) */}
+            {isLoadingMovements && (
+              <div className="space-y-2 py-1">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div
+                    key={i}
+                    className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700/70 animate-pulse flex items-center justify-between gap-2"
+                  >
+                    <div className="space-y-1.5 w-3/5">
+                      <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2"></div>
+                      <div className="h-2.5 bg-slate-200 dark:bg-slate-700 rounded w-4/5"></div>
                     </div>
+                    <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-16"></div>
                   </div>
-                  <div className="text-right text-[11px] text-slate-500 shrink-0 font-mono">
-                    {new Date(mov.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Error state */}
+            {!isLoadingMovements && movementsError && (
+              <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span className="truncate">{movementsError}</span>
                 </div>
-              ))}
-            </div>
+                <button
+                  type="button"
+                  onClick={fetchRecentMovements}
+                  className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-bold text-xs hover:bg-rose-500 transition-colors shrink-0 cursor-pointer"
+                >
+                  Coba lagi
+                </button>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!isLoadingMovements && !movementsError && serverMovements.length === 0 && (
+              <div className="p-6 text-center text-slate-400 dark:text-slate-500 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                Belum ada riwayat untuk site Anda
+              </div>
+            )}
+
+            {/* Data rows (5 baris terbaru) */}
+            {!isLoadingMovements && !movementsError && serverMovements.length > 0 && (
+              <div className="space-y-2">
+                {serverMovements.slice(0, 5).map((mov) => {
+                  const isUndone = Boolean(mov.isUndone);
+                  return (
+                    <div
+                      key={mov.historyId || `${mov.assetCode}-${mov.timestamp}`}
+                      className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 transition-colors ${
+                        isUndone
+                          ? 'bg-slate-50/60 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800 opacity-60'
+                          : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-0.5 truncate min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`font-mono font-bold ${
+                              isUndone
+                                ? 'text-slate-500 dark:text-slate-400 line-through'
+                                : 'text-emerald-700 dark:text-emerald-400'
+                            }`}
+                          >
+                            {mov.assetCode || '-'}
+                          </span>
+                          {isUndone && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                              Dibatalkan
+                            </span>
+                          )}
+                        </div>
+
+                        {mov.machineName && (
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {mov.machineName}
+                          </div>
+                        )}
+
+                        <div className="text-slate-700 dark:text-slate-300 truncate text-[11px]">
+                          <span className="font-mono">{mov.fromLocation || '-'}</span> →{' '}
+                          <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                            {mov.toLocation || '-'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0 space-y-0.5">
+                        <div className="text-[11px] font-mono text-slate-600 dark:text-slate-400 font-semibold">
+                          {formatWibTimestamp(mov.timestamp)}
+                        </div>
+                        {mov.movedBy && (
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate max-w-[90px]">
+                            {mov.movedBy}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

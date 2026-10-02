@@ -44,6 +44,7 @@ export interface RackSlotItem {
   barcode?: string;
   serial?: string;
   name?: string;
+  localName?: string;
   site?: string;
   rak: string;      // 'R1'..'R6'
   tingkat: string;  // 'A'..'C'
@@ -59,6 +60,7 @@ export interface MachineSearchResult {
   barcode?: string;
   serial?: string;
   standardMachineName?: string;
+  localName?: string;
   manufacturer?: string;
   model?: string;
   locationId: string;

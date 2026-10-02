@@ -39,7 +39,7 @@ const TAB_TITLES: Record<string, { title: string; subtitle: string; icon: any }>
   rackmap: { title: 'WH2 Rack Map', subtitle: 'Denah Visual Rak R1–R6 Warehouse 2', icon: Grid },
   move: { title: 'Pindahkan Lokasi', subtitle: 'Mutasi Posisi Line & Rak', icon: Layers },
   transfers: { title: 'Transfer Antar Site', subtitle: 'Kirim & Terima Antar Pabrik', icon: ArrowRightLeft },
-  opname: { title: 'Stok Opname', subtitle: 'Rekonsiliasi Fisik Mesin', icon: ClipboardCheck },
+  opname: { title: 'Weekly Machine List', subtitle: 'Rekonsiliasi Fisik Mesin', icon: ClipboardCheck },
   history: { title: 'Riwayat Mesin', subtitle: 'Log Riwayat Pemindahan Mesin dari Server', icon: History },
   reports: { title: 'Laporan Harian', subtitle: 'Rekapitulasi Harian & Pengaturan Notifikasi Email', icon: FileText },
   users: { title: 'Kelola Pengguna', subtitle: 'Manajemen Akun & Otoritas', icon: Users },

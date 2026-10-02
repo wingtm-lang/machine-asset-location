@@ -675,30 +675,94 @@ class StorageService {
    */
   public async sendTransfer(params: {
     assetCodes: string[];
-    toSite: SiteId;
+    toSite: string;
     sentBy: string;
     userSiteAccess: string[];
     vehicleNo?: string;
     driverName?: string;
     note?: string;
-  }): Promise<{ success: boolean; message: string; count: number }> {
+  }): Promise<{
+    success: boolean;
+    message: string;
+    count: number;
+    skipped?: { code: string; reason: 'NOT_FOUND' | 'NO_ACCESS' | 'PENDING' | 'SOLD' | 'SAME_SITE'; assetCode?: string }[];
+  }> {
     const { assetCodes, toSite, sentBy, userSiteAccess, vehicleNo, driverName, note } = params;
 
     const validCodes: string[] = [];
-    for (const code of assetCodes) {
-      const machine = this.assetCodeMap.get(code.toUpperCase());
-      if (!machine) continue;
-      if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(machine.siteId)) continue;
-      if (machine.pendingTransferId || machine.status === 'SOLD') continue;
-      if (machine.siteId === toSite) continue;
+    const validMachines: Machine[] = [];
+    const seenAssetCodes = new Set<string>();
+    const skipped: { code: string; reason: 'NOT_FOUND' | 'NO_ACCESS' | 'PENDING' | 'SOLD' | 'SAME_SITE'; assetCode?: string }[] = [];
+
+    for (const rawCode of assetCodes) {
+      const clean = (rawCode || '').trim();
+      if (!clean) continue;
+
+      // 1. Resolve via getMachineByCode (support Barcode, Asset Code, and Serial)
+      const { machine } = this.getMachineByCode(clean);
+      if (!machine) {
+        skipped.push({ code: clean, reason: 'NOT_FOUND' });
+        continue;
+      }
+
+      // 2. Prevent duplicate machines in the same batch
+      const upperAsset = machine.assetCode.toUpperCase();
+      if (seenAssetCodes.has(upperAsset)) {
+        continue;
+      }
+
+      // 3. Validate user site access permission
+      if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(machine.siteId)) {
+        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'NO_ACCESS' });
+        continue;
+      }
+
+      // 4. Validate machine is not already pending transfer
+      if (machine.pendingTransferId) {
+        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'PENDING' });
+        continue;
+      }
+
+      // 5. Validate machine is not sold
+      if (machine.status === 'SOLD') {
+        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'SOLD' });
+        continue;
+      }
+
+      // 6. Validate destination is not the same site
+      if (machine.siteId === toSite) {
+        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'SAME_SITE' });
+        continue;
+      }
+
+      seenAssetCodes.add(upperAsset);
       validCodes.push(machine.assetCode);
+      validMachines.push(machine);
     }
 
     if (validCodes.length === 0) {
-      return { success: false, message: 'Tidak ada mesin yang valid untuk dikirim (periksa status atau izin).', count: 0 };
+      const reasonsMap: Record<string, number> = {};
+      skipped.forEach((s) => {
+        reasonsMap[s.reason] = (reasonsMap[s.reason] || 0) + 1;
+      });
+
+      const reasonDetails: string[] = [];
+      if (reasonsMap.NOT_FOUND) reasonDetails.push(`${reasonsMap.NOT_FOUND} tidak ditemukan`);
+      if (reasonsMap.PENDING) reasonDetails.push(`${reasonsMap.PENDING} sedang transfer`);
+      if (reasonsMap.NO_ACCESS) reasonDetails.push(`${reasonsMap.NO_ACCESS} di luar akses site`);
+      if (reasonsMap.SOLD) reasonDetails.push(`${reasonsMap.SOLD} berstatus SOLD`);
+      if (reasonsMap.SAME_SITE) reasonDetails.push(`${reasonsMap.SAME_SITE} sudah di site tujuan (${toSite})`);
+
+      const detailStr = reasonDetails.length > 0 ? `: ${reasonDetails.join(', ')}` : '';
+      return {
+        success: false,
+        message: `Tidak ada mesin yang valid untuk dikirim${detailStr}.`,
+        count: 0,
+        skipped,
+      };
     }
 
-    const firstMachine = this.assetCodeMap.get(validCodes[0].toUpperCase());
+    const firstMachine = validMachines[0];
     const fromSite = firstMachine?.siteId || '';
 
     // Wait for server response first
@@ -717,6 +781,7 @@ class StorageService {
           success: false,
           message: serverRes?.message || 'Gagal mengirim transfer di server.',
           count: 0,
+          skipped,
         };
       }
     } catch (err: any) {
@@ -724,6 +789,7 @@ class StorageService {
         success: false,
         message: err.message || 'Tidak dapat terhubung ke server untuk mengirim transfer.',
         count: 0,
+        skipped,
       };
     }
 
@@ -732,10 +798,7 @@ class StorageService {
     const now = new Date().toISOString();
     const batchId = `BATCH-${Date.now()}`;
 
-    for (const code of validCodes) {
-      const machine = this.assetCodeMap.get(code.toUpperCase());
-      if (!machine) continue;
-
+    for (const machine of validMachines) {
       const transferId = `TRF-${Date.now()}-${count + 1}`;
       machine.pendingTransferId = transferId;
       machine.updatedAt = now;
@@ -746,7 +809,7 @@ class StorageService {
         batchId,
         assetCode: machine.assetCode,
         fromSite: machine.siteId,
-        toSite,
+        toSite: toSite as SiteId,
         status: 'IN_TRANSIT',
         sentAt: now,
         sentBy,
@@ -763,7 +826,7 @@ class StorageService {
         fromLocation: machine.locationId,
         toLocation: `${toSite}-IN_TRANSIT`,
         fromSite: machine.siteId,
-        toSite,
+        toSite: toSite as SiteId,
         transferId,
         reason: `Transfer keluar ke ${toSite}: ${note || ''}`,
         byUser: sentBy,
@@ -776,7 +839,13 @@ class StorageService {
     this.save();
     this.notifyListeners();
 
-    return { success: true, message: `${count} mesin berhasil dikirim ke ${toSite} (Status: In Transit).`, count };
+    const skippedInfo = skipped.length > 0 ? ` (${skipped.length} kode lain dilewati)` : '';
+    return {
+      success: true,
+      message: `${count} mesin berhasil dikirim ke ${toSite} (Status: In Transit)${skippedInfo}.`,
+      count,
+      skipped,
+    };
   }
 
   /**
@@ -1430,6 +1499,7 @@ class StorageService {
         serial,
         standardMachineName: raw.standardMachineName || raw.name || raw.MachineName || raw.item || 'Sewing Machine',
         item: raw.item || raw.standardMachineName || 'Sewing Machine',
+        localName: String(raw.localName || '').trim() || undefined,
         model: raw.model || raw.Model || '',
         manufacturer: raw.manufacturer || raw.Maker || '',
         locationId: loc,

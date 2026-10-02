@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search,
   Filter,
@@ -19,13 +19,16 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
-import { Machine, MachineStatus } from '../types';
+import { Machine, MachineStatus, MachineListFilter } from '../types';
+import { getMachineLabel } from '../utils/machineName';
 
 interface MachinesListViewProps {
   onSelectMachine: (machine: Machine) => void;
   onOpenScanner: () => void;
   onMoveBatch: (machines: Machine[]) => void;
   onTransferBatch: (machines: Machine[]) => void;
+  initialFilter?: MachineListFilter | null;
+  onConsumeInitialFilter?: () => void;
 }
 
 export const MachinesListView: React.FC<MachinesListViewProps> = ({
@@ -33,6 +36,8 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
   onOpenScanner,
   onMoveBatch,
   onTransferBatch,
+  initialFilter,
+  onConsumeInitialFilter,
 }) => {
   const { currentUser, language, canPerformAction, canAccessSite } = useAuth();
   const allMachines = storageService.getAllMachines();
@@ -40,10 +45,16 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSite, setSelectedSite] = useState<string>('ALL');
-  const [selectedStatus, setSelectedStatus] = useState<string>('ACTIVE'); // Default ACTIVE as per A5.3
-  const [selectedManufacturer, setSelectedManufacturer] = useState<string>('ALL');
-  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [selectedSite, setSelectedSite] = useState<string>(initialFilter?.site ?? 'ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>(initialFilter?.status ?? 'ACTIVE');
+  const [selectedManufacturer, setSelectedManufacturer] = useState<string>(initialFilter?.manufacturer ?? 'ALL');
+  const [onlyUnassigned, setOnlyUnassigned] = useState(initialFilter?.unassigned ?? false);
+  const [typeFilter, setTypeFilter] = useState<string | null>(initialFilter?.typeName ?? null);
+
+  // Filter hanya berlaku sekali; kosongkan di App agar menu "Data Mesin" biasa tidak ikut terfilter
+  useEffect(() => {
+    if (initialFilter) onConsumeInitialFilter?.();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -51,6 +62,11 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
 
   // Bulk selection state
   const [selectedAssetCodes, setSelectedAssetCodes] = useState<Set<string>>(new Set());
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
+
+  const isSelectable = (m: Machine) =>
+    canAccessSite(m.siteId) && m.status !== 'SOLD' && !m.pendingTransferId;
 
   // Quick Google Sheet Sync
   const [isSyncing, setIsSyncing] = useState(false);
@@ -99,7 +115,14 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
       if (selectedSite !== 'ALL' && m.siteId !== selectedSite) return false;
 
       // 3. Status filter
-      if (selectedStatus !== 'ALL' && m.status !== selectedStatus) return false;
+      if (selectedStatus === 'BROKEN_REPAIR') {
+        if (m.status !== 'BROKEN' && m.status !== 'IN_REPAIR') return false;
+      } else if (selectedStatus !== 'ALL' && m.status !== selectedStatus) {
+        return false;
+      }
+
+      // 3b. Jenis mesin (dari klik dashboard)
+      if (typeFilter && (m.standardMachineName || 'Unknown Type') !== typeFilter) return false;
 
       // 4. Manufacturer filter
       if (selectedManufacturer !== 'ALL' && m.manufacturer !== selectedManufacturer) return false;
@@ -114,16 +137,17 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
         const matchesSerial = m.serial.toLowerCase().includes(q);
         const matchesModel = m.model.toLowerCase().includes(q);
         const matchesName = m.standardMachineName.toLowerCase().includes(q);
+        const matchesLocal = (m.localName || '').toLowerCase().includes(q);
         const matchesLocation = m.locationId.toLowerCase().includes(q);
 
-        if (!matchesBarcode && !matchesAsset && !matchesSerial && !matchesModel && !matchesName && !matchesLocation) {
+        if (!matchesBarcode && !matchesAsset && !matchesSerial && !matchesModel && !matchesName && !matchesLocation && !matchesLocal) {
           return false;
         }
       }
 
       return true;
     });
-  }, [allMachines, currentUser, selectedSite, selectedStatus, selectedManufacturer, onlyUnassigned, searchQuery]);
+  }, [allMachines, currentUser, selectedSite, selectedStatus, selectedManufacturer, onlyUnassigned, searchQuery, typeFilter]);
 
   // Paginated slice
   const totalPages = Math.ceil(filteredMachines.length / pageSize) || 1;
@@ -144,10 +168,89 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
     setSelectedAssetCodes(next);
   };
 
+  const showNotice = (text: string) => {
+    setBatchNotice(text);
+    setTimeout(() => setBatchNotice(null), 5000);
+  };
+
+  const addByCodes = (codes: string[]) => {
+    const next = new Set(selectedAssetCodes);
+    let added = 0;
+    const already: string[] = [], skipped: string[] = [], notFound: string[] = [];
+
+    for (const code of codes) {
+      const { machine } = storageService.getMachineByCode(code);
+      if (!machine) { notFound.push(code); continue; }
+      if (!isSelectable(machine)) { skipped.push(machine.assetCode); continue; }
+      if (next.has(machine.assetCode)) { already.push(machine.assetCode); continue; }
+      next.add(machine.assetCode);
+      added++;
+    }
+    setSelectedAssetCodes(next);
+
+    const parts: string[] = [];
+    if (added) parts.push(`${added} mesin ditambahkan`);
+    if (already.length) parts.push(`${already.length} sudah terpilih`);
+    if (skipped.length) parts.push(`${skipped.length} dilewati (SOLD / transfer / di luar akses): ${skipped.slice(0, 3).join(', ')}`);
+    if (notFound.length) parts.push(`tidak ditemukan: ${notFound.slice(0, 3).join(', ')}${notFound.length > 3 ? '...' : ''}`);
+    showNotice(parts.join(' · '));
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    const q = searchQuery.trim();
+    if (!q) return;
+    e.preventDefault();
+
+    // 1) Kode lengkap (scan / ketik persis)
+    if (storageService.getMachineByCode(q).machine) {
+      addByCodes([q]);
+      setSearchQuery('');
+      setCurrentPage(1);
+      return;
+    }
+    // 2) Beberapa kode dipisah spasi / koma / titik koma
+    const tokens = q.split(/[\s,;]+/).filter(Boolean);
+    if (tokens.length > 1) {
+      addByCodes(tokens);
+      setSearchQuery('');
+      setCurrentPage(1);
+      return;
+    }
+    // 3) Hasil pencarian tinggal satu
+    if (filteredMachines.length === 1) {
+      addByCodes([filteredMachines[0].assetCode]);
+      setSearchQuery('');
+      setCurrentPage(1);
+    }
+  };
+
+  const handleSearchPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const tokens = e.clipboardData.getData('text').split(/[\s,;]+/).filter(Boolean);
+    const hits = tokens.filter((t) => storageService.getMachineByCode(t).machine).length;
+    if (tokens.length > 1 && hits >= 2) {   // daftar kode, bukan kalimat biasa
+      e.preventDefault();
+      addByCodes(tokens);
+    }
+  };
+
   const toggleSelectOne = (code: string) => {
     const next = new Set(selectedAssetCodes);
-    if (next.has(code)) next.delete(code);
-    else next.add(code);
+    const selecting = !next.has(code);
+    if (selecting) next.add(code); else next.delete(code);
+    setSelectedAssetCodes(next);
+
+    // Hasil tinggal satu -> kosongkan kotak agar bisa langsung cari berikutnya
+    if (selecting && searchQuery && filteredMachines.length === 1) {
+      setSearchQuery('');
+      setCurrentPage(1);
+      searchInputRef.current?.focus();
+    }
+  };
+
+  const handleSelectAllFiltered = () => {
+    const next = new Set(selectedAssetCodes);
+    filteredMachines.filter(isSelectable).forEach((m) => next.add(m.assetCode));
     setSelectedAssetCodes(next);
   };
 
@@ -161,6 +264,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
       'Asset Code': m.assetCode,
       'Barcode (12-Digit)': m.barcode,
       'Standard Machine Name': m.standardMachineName,
+      'Nama Lokal': m.localName || '',
       'Item (Korea)': m.item,
       'Manufacturer': m.manufacturer,
       'Model': m.model,
@@ -189,13 +293,16 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
           <div className="relative flex-1 w-full">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
+              ref={searchInputRef}
               type="text"
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Cari Asset Code (IDN-...), Barcode 12-digit, Serial Number, Model, atau Line..."
+              onKeyDown={handleSearchKeyDown}
+              onPaste={handleSearchPaste}
+              placeholder="Cari / scan kode lalu Enter untuk menandai · tempel banyak kode sekaligus"
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 font-mono transition-colors shadow-xs"
             />
             {searchQuery && (
@@ -246,6 +353,28 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
           </div>
         )}
 
+        {typeFilter && (
+          <div className="text-xs">
+            <span className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900 font-semibold">
+              Jenis mesin: {typeFilter}
+              <button
+                type="button"
+                onClick={() => { setTypeFilter(null); setCurrentPage(1); }}
+                className="w-4 h-4 rounded-full text-slate-400 hover:text-rose-600 hover:bg-rose-50 leading-none cursor-pointer"
+                aria-label="Hapus filter jenis mesin"
+              >
+                ✕
+              </button>
+            </span>
+          </div>
+        )}
+
+        {batchNotice && (
+          <div className="p-3 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs">
+            {batchNotice}
+          </div>
+        )}
+
         {/* Filter Pills / Selectors */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-3 border-t border-slate-100 text-xs">
           {/* Site Filter */}
@@ -285,8 +414,10 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
             >
               <option value="ALL">Semua Status (Termasuk Sold)</option>
               <option value="ACTIVE">ACTIVE (Hanya Aktif)</option>
+              <option value="IN_TRANSIT">IN_TRANSIT (Dalam Perjalanan)</option>
               <option value="IN_REPAIR">IN_REPAIR (Sedang Diperbaiki)</option>
               <option value="BROKEN">BROKEN (Rusak)</option>
+              <option value="BROKEN_REPAIR">BROKEN + IN_REPAIR (Perbaikan & Rusak)</option>
               <option value="LOANED">LOANED (Dipinjam)</option>
               <option value="SOLD">SOLD (Dijual/Afkir)</option>
             </select>
@@ -363,12 +494,39 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               </button>
             )}
 
+            {filteredMachines.length > currentMachines.length && (
+              <button
+                onClick={handleSelectAllFiltered}
+                className="px-2.5 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold"
+              >
+                Pilih semua {filteredMachines.length} hasil
+              </button>
+            )}
+
             <button
               onClick={() => setSelectedAssetCodes(new Set())}
               className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold"
             >
               Batal
             </button>
+          </div>
+
+          <div className="basis-full flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+            {selectedMachineObjects.map((m) => (
+              <span
+                key={m.assetCode}
+                className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-white border border-emerald-200 text-[11px] font-mono text-emerald-900"
+              >
+                {m.assetCode}
+                <button
+                  onClick={() => toggleSelectOne(m.assetCode)}
+                  className="w-4 h-4 rounded-full text-slate-400 hover:text-rose-600 hover:bg-rose-50 leading-none"
+                  aria-label={`Hapus ${m.assetCode} dari pilihan`}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
           </div>
         </div>
       )}
@@ -411,6 +569,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                 currentMachines.map((m) => {
                   const isSelected = selectedAssetCodes.has(m.assetCode);
                   const isUnassigned = m.locationId.includes('UNASSIGNED');
+                  const nm = getMachineLabel(m);
 
                   return (
                     <tr
@@ -442,8 +601,8 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                       </td>
 
                       <td className="p-3.5">
-                        <div className="font-bold text-slate-900 text-xs">{m.standardMachineName}</div>
-                        <div className="text-[11px] text-slate-500">{m.item || '-'}</div>
+                        <div className="font-bold text-slate-900 text-xs">{nm.primary}</div>
+                        <div className="text-[11px] text-slate-500">{[nm.secondary, m.item].filter(Boolean).join(' · ') || '-'}</div>
                       </td>
 
                       <td className="p-3.5">
@@ -483,15 +642,12 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                       <td className="p-3.5">
                         <span
                           className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                            m.status === 'ACTIVE'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : m.status === 'BROKEN'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : m.status === 'IN_REPAIR'
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : m.status === 'LOANED'
-                              ? 'bg-purple-50 text-purple-700 border-purple-200'
-                              : 'bg-slate-100 text-slate-700 border-slate-200'
+                            m.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : m.status === 'IN_TRANSIT' ? 'bg-sky-50 text-sky-700 border-sky-200'
+                            : m.status === 'BROKEN' ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : m.status === 'IN_REPAIR' ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : m.status === 'LOANED' ? 'bg-purple-50 text-purple-700 border-purple-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-200'
                           }`}
                         >
                           {m.status}

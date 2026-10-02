@@ -35,7 +35,7 @@ export interface Rack {
   active: boolean;
 }
 
-export type MachineStatus = 'ACTIVE' | 'BROKEN' | 'IN_REPAIR' | 'LOANED' | 'SOLD';
+export type MachineStatus = 'ACTIVE' | 'BROKEN' | 'IN_REPAIR' | 'LOANED' | 'SOLD' | 'IN_TRANSIT';
 
 export interface Machine {
   assetCode: string; // e.g. 'IDN-8-2009-1396'
@@ -44,6 +44,7 @@ export interface Machine {
   homeFactory: string; // e.g. 'PT.WINNERS(1)' or 'PW1'
   acqDate: string;   // YYYY-MM-DD
   standardMachineName: string; // e.g. '1-Needle Lockstitch Machine'
+  localName?: string; // nama lokal lapangan
   serial: string;    // text with leading zeros e.g. '0976914'
   manufacturer: string; // e.g. 'JUKI', 'BROTHER'
   model: string;     // e.g. 'DDL-8700-7'
@@ -61,6 +62,14 @@ export interface Machine {
   updatedAt: string;
   updatedBy: string;
   notes?: string;
+}
+
+export interface MachineListFilter {
+  status?: string;     // ALL | ACTIVE | IN_TRANSIT | IN_REPAIR | BROKEN | LOANED | SOLD | BROKEN_REPAIR
+  site?: string;       // ALL | PW1 | ...
+  typeName?: string;   // nama mesin standar (persis)
+  manufacturer?: string;
+  unassigned?: boolean;
 }
 
 export type MovementType = 'MOVE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'OPNAME_FIX' | 'UNDO' | 'ADMIN_FIX';

@@ -19,7 +19,7 @@ export const defaultTranslations: Translations = {
   rackmap: { id: 'Mapping Rak WH2', en: 'WH2 Rack Map' },
   move: { id: 'Pindah Lokasi', en: 'Move Location' },
   transfers: { id: 'Transfer Antar Site', en: 'Inter-Site Transfer' },
-  opname: { id: 'Opname Mingguan', en: 'Weekly Opname' },
+  opname: { id: 'Weekly Machine List', en: 'Weekly Machine List' },
   reports: { id: 'Laporan Harian', en: 'Daily Reports' },
   admin: { id: 'Admin & Pengaturan', en: 'Admin & Settings' },
   login: { id: 'Masuk', en: 'Sign In' },
@@ -111,7 +111,7 @@ export const defaultTranslations: Translations = {
   overdue_alert: { id: 'PERINGATAN: Transfer belum diterima lebih dari 3 hari!', en: 'ALERT: Transfer has been pending for over 3 days!' },
 
   // Opname View
-  opname_title: { id: 'Audit Fisik / Opname Mingguan', en: 'Weekly Physical Opname Audit' },
+  opname_title: { id: 'Weekly Machine List', en: 'Weekly Machine List' },
   select_opname_loc: { id: 'Pilih Lokasi yang Di-Audit', en: 'Select Location to Audit' },
   start_opname: { id: 'Mulai Sesi Opname', en: 'Start Opname Session' },
   finish_opname: { id: 'Selesaikan & Simpan Opname', en: 'Finish & Save Opname' },
@@ -122,7 +122,7 @@ export const defaultTranslations: Translations = {
   misplaced_count: { id: 'Salah Lokasi (Misplaced)', en: 'Misplaced' },
   move_to_this_location: { id: 'Pindahkan ke Sini', en: 'Move to this location' },
   reported_to_admin: { id: 'Dilaporkan ke Admin & Pabrik Terkait', en: 'Reported to Admin & Home Site' },
-  opname_progress_week: { id: 'Progres Opname Minggu Ini', en: 'Weekly Opname Progress' },
+  opname_progress_week: { id: 'Progres Weekly Machine List Minggu Ini', en: 'Weekly Machine List Progress' },
 
   // Reports View
   daily_report_title: { id: 'Laporan Harian Mesin & Rekapitulasi', en: 'Daily Machine Asset & Movement Report' },

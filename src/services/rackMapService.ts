@@ -127,6 +127,7 @@ export const rackMapService = {
             barcode: found.barcode,
             serial: found.serial,
             standardMachineName: found.standardMachineName || found.item,
+            localName: found.localName,
             manufacturer: found.manufacturer,
             model: found.model,
             locationId: found.locationId,

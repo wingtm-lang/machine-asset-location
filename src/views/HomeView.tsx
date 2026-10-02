@@ -80,7 +80,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     },
     {
       id: 'opname',
-      title: 'Stok Opname',
+      title: 'Weekly Machine List',
       desc: 'Rekonsiliasi berkala fisik mesin dengan pemindai barcode / QR dan catat selisih lokasi.',
       icon: ClipboardCheck,
       allowed: canPerformAction('OPNAME'),

@@ -329,7 +329,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                       {filledItem.assetCode}
                     </div>
                     <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      {filledItem.name || 'Mesin Jahit'}
+                      {filledItem.localName || filledItem.name || 'Mesin Jahit'}
                       {filledItem.serial ? ` · ${filledItem.serial}` : ''}
                     </div>
                   </div>
@@ -410,7 +410,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                          {searchResult.standardMachineName || 'Mesin'} {searchResult.model ? `· ${searchResult.model}` : ''}
+                          {searchResult.localName || searchResult.standardMachineName || 'Mesin'} {searchResult.model ? `· ${searchResult.model}` : ''}
                         </div>
                       </div>
 

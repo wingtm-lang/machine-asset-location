@@ -20,7 +20,7 @@ import { OpnameView } from './views/OpnameView';
 import { HistoryView } from './views/HistoryView';
 import { ReportsView } from './views/ReportsView';
 import { AdminView } from './views/AdminView';
-import { Machine } from './types';
+import { Machine, MachineListFilter } from './types';
 import {
   ShieldAlert,
   Loader2,
@@ -79,6 +79,12 @@ const MainAppInner: React.FC = () => {
   const [movePreselectedMachine, setMovePreselectedMachine] = useState<Machine | null>(null);
   const [moveBatchMachines, setMoveBatchMachines] = useState<Machine[]>([]);
   const [transferBatchMachines, setTransferBatchMachines] = useState<Machine[]>([]);
+  const [machinesFilter, setMachinesFilter] = useState<MachineListFilter | null>(null);
+
+  const handleOpenMachinesFiltered = (filter: MachineListFilter) => {
+    setMachinesFilter(filter);
+    setActiveTab('machines');
+  };
 
   const handleOpenDetail = (machine: Machine) => {
     setSelectedMachine(machine);
@@ -216,6 +222,7 @@ const MainAppInner: React.FC = () => {
         {activeTab === 'dashboard' && (
           <DashboardView
             onNavigateTab={setActiveTab}
+            onOpenMachines={handleOpenMachinesFiltered}
             onSelectMachine={handleOpenDetail}
             onOpenScanner={() => setIsScannerOpen(true)}
           />
@@ -223,6 +230,8 @@ const MainAppInner: React.FC = () => {
 
         {activeTab === 'machines' && (
           <MachinesListView
+            initialFilter={machinesFilter}
+            onConsumeInitialFilter={() => setMachinesFilter(null)}
             onSelectMachine={handleOpenDetail}
             onOpenScanner={() => setIsScannerOpen(true)}
             onMoveBatch={handleMoveBatch}

@@ -16,6 +16,7 @@ import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 import { Machine, MachineStatus, Location } from '../types';
+import { getMachineLabel } from '../utils/machineName';
 
 interface MoveViewProps {
   initialMachine?: Machine | null;
@@ -221,7 +222,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
                 >
                   <div className="space-y-0.5 truncate">
                     <div className="font-mono font-bold text-emerald-700">{m.assetCode}</div>
-                    <div className="font-semibold text-slate-900 truncate">{m.standardMachineName}</div>
+                    <div className="font-semibold text-slate-900 truncate">{getMachineLabel(m).primary}</div>
                     <div className="text-[11px] text-slate-500">
                       Lokasi Asal: <span className="font-mono font-bold text-amber-700">{m.locationId}</span>
                     </div>

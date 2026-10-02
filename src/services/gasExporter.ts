@@ -136,6 +136,7 @@ function getSheetColumnIndices(sheet) {
     lastMovedAt: findCol(['lastmovedat', 'lastupdated', 'updatedat', 'tglupdate', 'waktupindah', 'tanggalpindah']),
     lastMovedBy: findCol(['lastmovedby', 'updatedby', 'user', 'operator', 'olehpengguna', 'dipindahkanoleh']),
     standardMachineName: findCol(['standardmachinename', 'machinename', 'namamesin', 'description', 'jenis']),
+    localName: findCol(['localname', 'namalokal', 'namamesinlokal', 'alias']),
     item: findCol(['item', 'itemname', 'koreanname', 'namaitem', 'itemkr']),
     homeFactory: findCol(['homefactory', 'pabrikasal', 'originfactory']),
     acqDate: findCol(['acqdate', 'acquisitiondate', 'tanggalperolehan', 'tglperolehan']),
@@ -207,6 +208,54 @@ function formatCurrentDateTime() {
   return Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd HH:mm:ss");
 }
 
+function nameKey(s) {
+  return String(s || '').trim().toLowerCase().replace(/ +/g, ' ');
+}
+
+function getLocalNameMap() {
+  var sh = getSpreadsheet().getSheetByName('Machine_Names');
+  var map = {};
+  if (!sh) return map;
+  var d = sh.getDataRange().getValues();
+  for (var i = 1; i < d.length; i++) {
+    var k = nameKey(d[i][0]), v = String(d[i][1] || '').trim();
+    if (k && v) map[k] = v;
+  }
+  return map;
+}
+
+// Prioritas: kolom per mesin > pemetaan nama standar > pemetaan nama item (Korea)
+function resolveLocalName(map, own, stdName, item) {
+  if (own) return own;
+  return map[nameKey(stdName)] || map[nameKey(item)] || '';
+}
+
+// Jalankan sekali dari editor. Membuat sheet dan mengisi daftar tipe mesin unik.
+function setupMachineNamesSheet() {
+  var ss = getSpreadsheet();
+  var sh = ss.getSheetByName('Machine_Names');
+  if (!sh) {
+    sh = ss.insertSheet('Machine_Names');
+    sh.appendRow(['StandardName', 'LocalName']);
+    sh.getRange(1, 1, 1, 2).setBackground('#1e293b').setFontColor('#ffffff').setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  var existing = {}, cur = sh.getDataRange().getValues();
+  for (var i = 1; i < cur.length; i++) existing[nameKey(cur[i][0])] = true;
+
+  var idx = getSheetColumnIndices(getMachineAssetSheet(ss));
+  if (idx.standardMachineName === -1) throw new Error('Kolom nama mesin standar tidak ditemukan');
+  var counts = {};
+  for (var r = 1; r < idx.data.length; r++) {
+    var n = String(idx.data[r][idx.standardMachineName] || '').trim();
+    if (n) counts[n] = (counts[n] || 0) + 1;
+  }
+  var rows = Object.keys(counts).sort().filter(function (n) { return !existing[nameKey(n)]; })
+    .map(function (n) { return [n, '']; });
+  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 2).setValues(rows);
+  Logger.log('Tipe mesin ditambahkan: ' + rows.length + '. Isi kolom LocalName di sheet Machine_Names.');
+}
+
 function handleGetInitialData(user) {
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
@@ -218,6 +267,7 @@ function handleGetInitialData(user) {
   indices = ensureTrackingColumns(mSheet, indices);
   var data = mSheet.getDataRange().getValues();
 
+  var localMap = getLocalNameMap();
   var machines = [];
   for (var r = 1; r < data.length; r++) {
     var row = data[r];
@@ -259,6 +309,8 @@ function handleGetInitialData(user) {
       barcode: barcode,
       serial: serial,
       standardMachineName: mName,
+      localName: resolveLocalName(localMap,
+        indices.localName !== -1 ? String(row[indices.localName] || '').trim() : '', mName, item),
       item: item,
       model: model,
       manufacturer: manufacturer,
@@ -615,35 +667,158 @@ function handleReceiveTransfer(user, params) {
 }
 
 function handleCancelTransfer(user, params) {
+  params = params || {};
   var ss = getSpreadsheet();
   var mSheet = getMachineAssetSheet(ss);
   var tSheet = getOrCreateTransferOrdersSheet(ss);
+  var hSheet = getOrCreateMovementHistorySheet(ss);
 
-  var transferId = params.transferId;
-  var targetAsset = params.assetCode;
+  var transferId = String(params.transferId || '').trim();
+  var oneAsset = String(params.assetCode || '').trim();
   var username = (user && user.username) ? user.username : (params.username || 'Admin');
+  var ts = formatCurrentDateTime();
 
   var indices = getSheetColumnIndices(mSheet);
+  indices = ensureTrackingColumns(mSheet, indices);
   var mData = mSheet.getDataRange().getValues();
-
-  if (targetAsset) {
-    var mRow = findMachineRow(mData, indices, targetAsset, targetAsset, '');
-    if (mRow !== -1) {
-      if (indices.pendingTransferId !== -1) mSheet.getRange(mRow, indices.pendingTransferId + 1).setValue('');
-      if (indices.status !== -1) mSheet.getRange(mRow, indices.status + 1).setValue('ACTIVE');
-    }
-  }
-
+  var hData = hSheet.getDataRange().getValues();
   var tData = tSheet.getDataRange().getValues();
-  for (var i = 1; i < tData.length; i++) {
-    if (String(tData[i][0]) === String(transferId)) {
-      tSheet.getRange(i + 1, 5).setValue('CANCELLED');
-      tSheet.getRange(i + 1, 8).setValue('Dibatalkan oleh ' + username);
-      break;
-    }
+
+  // 1) Cari order transfer yang masih IN_TRANSIT (lewat ID atau kode aset)
+  var orderRow = -1, orderList = [];
+  for (var t = tData.length - 1; t >= 1; t--) {
+    if (String(tData[t][4]).toUpperCase() !== 'IN_TRANSIT') continue;
+    var list = [];
+    try { list = JSON.parse(tData[t][1]); } catch (e) { list = [tData[t][1]]; }
+    var idHit = transferId && String(tData[t][0]) === transferId;
+    var assetHit = oneAsset && list.some(function (x) {
+      return String(x).toUpperCase() === oneAsset.toUpperCase();
+    });
+    if (idHit || assetHit) { orderRow = t + 1; orderList = list; break; }
   }
 
-  return { success: true, message: 'Transfer ' + transferId + ' berhasil dibatalkan' };
+  var targets = oneAsset ? [oneAsset] : orderList.slice();
+  if (!targets.length) {
+    return { success: false, message: 'Transfer tidak ditemukan, sudah diterima, atau sudah dibatalkan.' };
+  }
+
+  var cancelled = [], keys = [], skipped = [], fallbacks = [];
+
+  for (var i = 0; i < targets.length; i++) {
+    var target = targets[i];
+    var mRow = findMachineRow(mData, indices, target, target, '');
+    if (mRow === -1) { skipped.push(target + ' (tidak ditemukan)'); continue; }
+
+    var row = mData[mRow - 1];
+    var asset = indices.assetCode !== -1 ? String(row[indices.assetCode] || '').trim() : String(target);
+    var barcode = indices.barcode !== -1 ? String(row[indices.barcode] || '').trim() : '';
+    var curStatus = indices.status !== -1 ? String(row[indices.status] || '').trim().toUpperCase() : '';
+    var pending = indices.pendingTransferId !== -1 ? String(row[indices.pendingTransferId] || '').trim() : '';
+    var curLoc = indices.locationId !== -1 ? String(row[indices.locationId] || '').trim() : '';
+
+    if (curStatus.indexOf('TRANSIT') === -1 && !pending) {
+      skipped.push(asset + ' (tidak sedang In Transit)');
+      continue;
+    }
+
+    // 2) Cari baris pengiriman terakhir di Movement_History (asal + status lama)
+    var origin = null;
+    for (var h = hData.length - 1; h >= 1; h--) {
+      if (String(hData[h][2]).trim().toUpperCase() === asset.toUpperCase() &&
+          String(hData[h][6]).toUpperCase().indexOf('-IN_TRANSIT') !== -1) {
+        origin = {
+          loc: String(hData[h][5] || '').trim(),
+          site: String(hData[h][7] || '').trim().toUpperCase(),
+          status: String(hData[h][15] || '').trim()
+        };
+        break;
+      }
+    }
+
+    var orderFrom = orderRow !== -1 ? String(tData[orderRow - 1][2] || '').trim().toUpperCase() : '';
+    var orderTo = orderRow !== -1 ? String(tData[orderRow - 1][3] || '').trim().toUpperCase() : '';
+    var restoreLoc, restoreSite, restoreStatus;
+
+    if (origin && origin.loc) {
+      restoreLoc = origin.loc;
+      restoreSite = origin.site || siteOfLocation(origin.loc);
+      restoreStatus = origin.status || 'ACTIVE';
+    } else {
+      restoreSite = orderFrom || (indices.siteId !== -1 ? String(row[indices.siteId] || '').trim().toUpperCase() : 'PW1');
+      restoreLoc = restoreSite + '-UNASSIGNED';
+      restoreStatus = 'ACTIVE';
+      fallbacks.push(asset + ' (riwayat pengiriman tidak ditemukan)');
+    }
+
+    // 3) Hanya pengirim dari site asal (atau admin / all sites) yang boleh membatalkan
+    if (restoreSite && !hasSite(user, restoreSite)) {
+      skipped.push(asset + ' (di luar akses site asal ' + restoreSite + ')');
+      continue;
+    }
+
+    // 4) Slot rak lama sudah terisi mesin lain -> jatuhkan ke UNASSIGNED
+    if (validateRackTarget(restoreLoc, mData, indices, mRow)) {
+      restoreLoc = restoreSite + '-UNASSIGNED';
+      fallbacks.push(asset + ' (slot lama sudah terisi)');
+    }
+
+    // 5) Tulis ke sheet mesin
+    if (indices.locationId !== -1) mSheet.getRange(mRow, indices.locationId + 1).setValue(restoreLoc);
+    if (indices.siteId !== -1 && restoreSite) mSheet.getRange(mRow, indices.siteId + 1).setValue(restoreSite);
+    if (indices.status !== -1) mSheet.getRange(mRow, indices.status + 1).setValue(restoreStatus);
+    if (indices.pendingTransferId !== -1) mSheet.getRange(mRow, indices.pendingTransferId + 1).setValue('');
+    if (indices.lastMovedAt !== -1) mSheet.getRange(mRow, indices.lastMovedAt + 1).setValue(ts);
+    if (indices.lastMovedBy !== -1) mSheet.getRange(mRow, indices.lastMovedBy + 1).setValue(username);
+
+    // Perbarui salinan memori agar validasi rak untuk mesin berikutnya akurat
+    if (indices.locationId !== -1) row[indices.locationId] = restoreLoc;
+
+    // 6) Catat riwayat
+    hSheet.appendRow([
+      'MOV-' + Date.now() + '-' + (i + 1),
+      barcode,
+      asset,
+      indices.serial !== -1 ? row[indices.serial] : '',
+      indices.standardMachineName !== -1 ? row[indices.standardMachineName] : '',
+      curLoc,
+      restoreLoc,
+      siteOfLocation(curLoc) || orderTo,
+      restoreSite,
+      restoreStatus,
+      'Transfer dibatalkan oleh ' + username,
+      username,
+      ts,
+      'Pembatalan transfer ' + (orderRow !== -1 ? tData[orderRow - 1][0] : transferId),
+      false,
+      ''
+    ]);
+
+    cancelled.push(asset);
+    keys.push(asset.toUpperCase());
+    if (barcode) keys.push(barcode.toUpperCase());
+  }
+
+  if (!cancelled.length) {
+    return { success: false, message: 'Tidak ada mesin yang dibatalkan. ' + skipped.join('; ') };
+  }
+
+  // 7) Keluarkan mesin yang dibatalkan dari daftar order; tutup order bila kosong
+  if (orderRow !== -1) {
+    var remaining = orderList.filter(function (x) {
+      return keys.indexOf(String(x).toUpperCase()) === -1;
+    });
+    tSheet.getRange(orderRow, 2).setValue(JSON.stringify(remaining));
+    var oldNote = String(tData[orderRow - 1][7] || '');
+    tSheet.getRange(orderRow, 8).setValue(
+      (oldNote ? oldNote + ' | ' : '') + 'Dibatalkan oleh ' + username + ': ' + cancelled.join(', ')
+    );
+    if (remaining.length === 0) tSheet.getRange(orderRow, 5).setValue('CANCELLED');
+  }
+
+  var msg = cancelled.length + ' mesin dikembalikan ke lokasi asal';
+  if (fallbacks.length) msg += '. Dikembalikan ke UNASSIGNED: ' + fallbacks.join('; ');
+  if (skipped.length) msg += '. Dilewati: ' + skipped.join('; ');
+  return { success: true, message: msg, cancelled: cancelled };
 }
 
 function handleSaveOpname(user, params) {
@@ -706,6 +881,11 @@ function handleSearchMachine(user, query) {
   var rowIndex = findMachineRow(data, indices, q, q, q);
   if (rowIndex !== -1) {
     var row = data[rowIndex - 1];
+    var lm = getLocalNameMap();
+    var own = indices.localName !== -1 ? String(row[indices.localName] || '').trim() : '';
+    var sName = indices.standardMachineName !== -1 ? String(row[indices.standardMachineName] || '').trim() : '';
+    var sItem = indices.item !== -1 ? String(row[indices.item] || '').trim() : '';
+
     return {
       success: true,
       machine: {
@@ -713,6 +893,7 @@ function handleSearchMachine(user, query) {
         barcode: indices.barcode !== -1 ? row[indices.barcode] : '',
         serial: indices.serial !== -1 ? row[indices.serial] : '',
         standardMachineName: indices.standardMachineName !== -1 ? row[indices.standardMachineName] : '',
+        localName: resolveLocalName(lm, own, sName, sItem),
         manufacturer: indices.manufacturer !== -1 ? row[indices.manufacturer] : '',
         model: indices.model !== -1 ? row[indices.model] : '',
         locationId: indices.locationId !== -1 ? row[indices.locationId] : '',
@@ -960,6 +1141,10 @@ function handleGetRackMap(user, params) {
   var slots = [];
   var issues = [];
   var seenSlots = {};
+  var lm = getLocalNameMap();
+  function cell(r, col) {
+    return col !== -1 ? String(data[r][col] || '').trim() : '';
+  }
 
   for (var r = 1; r < data.length; r++) {
     var loc = String(data[r][idx.locationId] || '').trim();
@@ -1011,6 +1196,7 @@ function handleGetRackMap(user, params) {
       barcode: bCode,
       serial: sNum,
       name: mName,
+      localName: resolveLocalName(lm, cell(r, idx.localName), cell(r, idx.standardMachineName), cell(r, idx.item)),
       model: model,
       status: rawStatus || 'ACTIVE',
       site: RACK_SITE,

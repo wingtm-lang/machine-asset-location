@@ -16,6 +16,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { Machine } from '../types';
+import { getMachineLabel } from '../utils/machineName';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
@@ -100,6 +101,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
 
   if (!isOpen || !machine) return null;
 
+  const nm = getMachineLabel(machine);
   const statusLogs = storageService.getStatusLogs(machine.assetCode);
   const transfers = storageService.getTransfers().filter((t) => t.assetCode === machine.assetCode);
   const hasSiteAccess = canAccessSite(machine.siteId);
@@ -120,7 +122,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-extrabold text-base text-slate-900">
-                  {machine.standardMachineName}
+                  {nm.primary}
                 </h3>
                 <span
                   className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${
@@ -138,6 +140,11 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                   {machine.status}
                 </span>
               </div>
+              {nm.secondary && (
+                <div className="text-[11px] text-slate-500 font-medium">
+                  {nm.secondary}
+                </div>
+              )}
               <p className="text-xs text-slate-500 font-mono">
                 {machine.assetCode} • Barcode: {machine.barcode}
               </p>
@@ -270,6 +277,16 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                         {machine.serial}
                       </span>
                     </div>
+                    <div className="flex justify-between py-1 border-b border-slate-200/80">
+                      <span className="text-slate-500">Nama Standar:</span>
+                      <span className="text-slate-800 font-medium">{machine.standardMachineName}</span>
+                    </div>
+                    {machine.localName && (
+                      <div className="flex justify-between py-1 border-b border-slate-200/80">
+                        <span className="text-slate-500">Nama Lokal:</span>
+                        <span className="text-slate-900 font-bold">{machine.localName}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
                       <span className="text-slate-500">Nama Korea (Item):</span>
                       <span className="text-slate-800 font-medium">{machine.item || '-'}</span>
@@ -477,8 +494,13 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
 
                 <div className="space-y-1.5 w-full">
                   <div className="text-xs font-black uppercase text-slate-900 line-clamp-1">
-                    {machine.standardMachineName}
+                    {nm.primary}
                   </div>
+                  {nm.secondary && (
+                    <div className="text-[10px] text-slate-500 font-medium line-clamp-1">
+                      {nm.secondary}
+                    </div>
+                  )}
 
                   {/* Asset Code Display */}
                   <div className="text-sm font-mono font-black text-emerald-800 tracking-wide">

@@ -22,6 +22,7 @@ import {
   Compass,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
+import { PtWinnersLogo } from './PtWinnersLogo';
 
 interface SidebarProps {
   activeTab: string;
@@ -83,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'opname',
-      label: 'Stok Opname',
+      label: 'Weekly Machine List',
       icon: ClipboardCheck,
       show: canPerformAction('OPNAME'),
     },
@@ -130,8 +131,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#113867]/90 via-[#0d2d53]/90 to-[#092240]/90 border border-[#285791]/60 shadow-inner backdrop-blur-xs transition-all">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-[#0c2e57] text-[#ffd23f] flex items-center justify-center font-bold text-base shadow-md border border-[#ffd23f]/40 shrink-0">
-                <Building2 className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-xs flex items-center justify-center p-1 shadow-md border border-[#ffd23f]/40 shrink-0 overflow-hidden">
+                <PtWinnersLogo className="w-full h-full object-contain" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
