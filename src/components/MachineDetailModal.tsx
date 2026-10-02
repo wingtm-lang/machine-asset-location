@@ -16,10 +16,11 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { Machine } from '../types';
-import { PtWinnersLogo } from './PtWinnersLogo';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
+import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
+import { Pagination } from './Pagination';
 
 interface MachineDetailModalProps {
   machine: Machine | null;
@@ -37,6 +38,37 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
   const { language, canAccessSite, canPerformAction } = useAuth();
   const [activeTab, setActiveTab] = useState<'info' | 'movements' | 'status_log' | 'qr_card'>('info');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+
+  // Server-side movement history states
+  const [serverMovements, setServerMovements] = useState<ServerMovementRecord[]>([]);
+  const [isLoadingMovements, setIsLoadingMovements] = useState<boolean>(false);
+  const [movementsError, setMovementsError] = useState<string | null>(null);
+  const [movementsPage, setMovementsPage] = useState<number>(1);
+
+  const fetchMachineMovements = async (assetCode: string) => {
+    setIsLoadingMovements(true);
+    setMovementsError(null);
+    setMovementsPage(1);
+    try {
+      const res = await gasAuthService.getMovements({ assetCode, limit: 100 });
+      if (res.success && res.movements) {
+        setServerMovements(res.movements);
+      } else {
+        setMovementsError(res.message || 'Gagal memuat riwayat mesin dari server.');
+      }
+    } catch (err: any) {
+      setMovementsError(err.message || 'Terjadi kesalahan saat memuat riwayat.');
+    } finally {
+      setIsLoadingMovements(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && machine && activeTab === 'movements') {
+      setMovementsPage(1);
+      fetchMachineMovements(machine.assetCode);
+    }
+  }, [isOpen, machine?.assetCode, activeTab]);
 
   // Generate authentic 2D QR Code from machine.barcode (not assetCode)
   useEffect(() => {
@@ -68,7 +100,6 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
 
   if (!isOpen || !machine) return null;
 
-  const movements = storageService.getMovements(machine.assetCode);
   const statusLogs = storageService.getStatusLogs(machine.assetCode);
   const transfers = storageService.getTransfers().filter((t) => t.assetCode === machine.assetCode);
   const hasSiteAccess = canAccessSite(machine.siteId);
@@ -143,7 +174,9 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             }`}
           >
             <History className="w-3.5 h-3.5" />
-            <span>Riwayat Pemindahan ({movements.length})</span>
+            <span>
+              Riwayat Pemindahan {isLoadingMovements ? '(...)' : `(${serverMovements.length})`}
+            </span>
           </button>
 
           <button
@@ -282,52 +315,95 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: MOVEMENTS HISTORY */}
+          {/* TAB 2: MOVEMENTS HISTORY (SERVER API) */}
           {activeTab === 'movements' && (
             <div className="space-y-3">
-              {movements.length === 0 ? (
+              {isLoadingMovements ? (
+                <div className="text-center py-10 space-y-2">
+                  <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs text-slate-500 font-mono">Memuat riwayat dari server...</p>
+                </div>
+              ) : movementsError ? (
+                <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between gap-3">
+                  <span>{movementsError}</span>
+                  <button
+                    type="button"
+                    onClick={() => machine && fetchMachineMovements(machine.assetCode)}
+                    className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
+                  >
+                    Coba Lagi
+                  </button>
+                </div>
+              ) : serverMovements.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-xs">
                   Belum ada catatan mutasi untuk mesin ini.
                 </div>
               ) : (
-                <div className="space-y-2.5">
-                  {movements.map((mov) => (
-                    <div
-                      key={mov.movementId}
-                      className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                              mov.type === 'MOVE'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : mov.type === 'TRANSFER_IN' || mov.type === 'TRANSFER_OUT'
-                                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                : mov.type === 'UNDO'
-                                ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                : 'bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                          >
-                            {mov.type}
-                          </span>
-                          <span className="font-mono text-slate-500 text-[11px]">
-                            {new Date(mov.timestamp).toLocaleString('id-ID')}
-                          </span>
+                <div className="space-y-3">
+                  <div className="space-y-2.5">
+                    {serverMovements
+                      .slice((movementsPage - 1) * 25, movementsPage * 25)
+                      .map((mov) => (
+                        <div
+                          key={mov.historyId || `${mov.assetCode}-${mov.timestamp}`}
+                          className={`p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                            mov.isUndone ? 'opacity-60 bg-rose-50/30' : ''
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                  mov.status === 'ACTIVE'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    : mov.status === 'BROKEN'
+                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                                }`}
+                              >
+                                {mov.status || 'MUTASI'}
+                              </span>
+                              {mov.isUndone && (
+                                <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 border border-rose-200">
+                                  Dibatalkan
+                                </span>
+                              )}
+                              <span className="font-mono text-slate-500 text-[11px]">
+                                {mov.timestamp}
+                              </span>
+                            </div>
+                            <div className="text-slate-900 font-medium">
+                              <span className="text-slate-500">Dari: </span>
+                              <span className="font-mono text-amber-800 font-bold">
+                                {mov.fromSite ? `[${mov.fromSite}] ` : ''}
+                                {mov.fromLocation || '-'}
+                              </span>
+                              <span className="text-slate-500"> → Menuju: </span>
+                              <span className="font-mono text-emerald-800 font-bold">
+                                {mov.toSite ? `[${mov.toSite}] ` : ''}
+                                {mov.toLocation || '-'}
+                              </span>
+                            </div>
+                            {mov.reason && <p className="text-[11px] text-slate-600 italic">{mov.reason}</p>}
+                            {mov.notes && <p className="text-[10px] text-slate-500">{mov.notes}</p>}
+                          </div>
+                          <div className="text-right text-[11px] text-slate-500 shrink-0">
+                            Oleh: <span className="font-bold text-slate-800">{mov.movedBy || 'Sistem'}</span>
+                          </div>
                         </div>
-                        <div className="text-slate-900 font-medium">
-                          <span className="text-slate-500">Dari: </span>
-                          <span className="font-mono text-amber-800 font-bold">{mov.fromLocation}</span>
-                          <span className="text-slate-500"> → Menuju: </span>
-                          <span className="font-mono text-emerald-800 font-bold">{mov.toLocation}</span>
-                        </div>
-                        {mov.reason && <p className="text-[11px] text-slate-600 italic">{mov.reason}</p>}
-                      </div>
-                      <div className="text-right text-[11px] text-slate-500 shrink-0">
-                        Oleh: <span className="font-bold text-slate-800">{mov.byUser}</span>
-                      </div>
-                    </div>
-                  ))}
+                      ))}
+                  </div>
+
+                  {/* Pagination jika baris riwayat > 25 */}
+                  {serverMovements.length > 25 && (
+                    <Pagination
+                      currentPage={movementsPage}
+                      totalItems={serverMovements.length}
+                      pageSize={25}
+                      onPageChange={setMovementsPage}
+                      itemLabel="mutasi"
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -375,10 +451,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                 className="w-80 bg-white text-slate-950 rounded-2xl p-5 border-2 border-slate-300 shadow-xl flex flex-col items-center text-center space-y-3 print:border-black print:shadow-none"
               >
                 <div className="w-full flex items-center justify-between border-b pb-2 border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded bg-white flex items-center justify-center p-0.5 border border-slate-200 shrink-0 overflow-hidden">
-                      <PtWinnersLogo className="w-full h-full object-contain" />
-                    </div>
+                  <div className="flex items-center gap-1.5">
                     <span className="font-black text-sm tracking-wider text-emerald-700">PT.WINNERS</span>
                     <span className="text-[10px] font-bold text-slate-400">• TAG 2D QR</span>
                   </div>

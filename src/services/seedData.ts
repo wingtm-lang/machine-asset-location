@@ -1,4 +1,5 @@
 import { Site, Location, Rack, Machine, User, ReportRecipient, AppSettings, Movement, StatusLog } from '../types';
+import { WH2_RACKS, formatSlotLocationId } from '../types/wh2Rack';
 
 export const INITIAL_SITES: Site[] = [
   { siteId: 'PW1', name: 'PT.WINNERS(1)', type: 'FACTORY', active: true },
@@ -9,14 +10,12 @@ export const INITIAL_SITES: Site[] = [
   { siteId: 'QA', name: 'QA Lab', type: 'LAB', active: true },
 ];
 
-export const INITIAL_RACKS: Rack[] = [
-  { siteId: 'WH2', rackNo: 1, columnCount: 6, active: true },
-  { siteId: 'WH2', rackNo: 2, columnCount: 6, active: true },
-  { siteId: 'WH2', rackNo: 3, columnCount: 8, active: true },
-  { siteId: 'WH2', rackNo: 4, columnCount: 8, active: true },
-  { siteId: 'WH2', rackNo: 5, columnCount: 5, active: true },
-  { siteId: 'WH2', rackNo: 6, columnCount: 5, active: true },
-];
+export const INITIAL_RACKS: Rack[] = WH2_RACKS.map((r) => ({
+  siteId: 'WH2',
+  rackNo: parseInt(r.id.replace('R', ''), 10),
+  columnCount: r.n,
+  active: true,
+}));
 
 export function generateLocations(): Location[] {
   const locations: Location[] = [];
@@ -131,22 +130,25 @@ export function generateLocations(): Location[] {
     sortOrder: sortOrder++,
   });
 
-  // WH2 Rack Slots
-  INITIAL_RACKS.forEach((rack) => {
-    for (let col = 1; col <= rack.columnCount; col++) {
+  // WH2 Rack Slots - format WH2-{rak}-{tingkat}{kolom}-S{slot}, capacity 1 per slot
+  WH2_RACKS.forEach((rack) => {
+    for (let col = 1; col <= rack.n; col++) {
       ['A', 'B', 'C'].forEach((stack) => {
-        locations.push({
-          locationId: `WH2-R${rack.rackNo}-${col}${stack}`,
-          siteId: 'WH2',
-          type: 'RACK_SLOT',
-          displayName: `Rak ${rack.rackNo} Kolom ${col} Stack ${stack}`,
-          rackNo: rack.rackNo,
-          columnNo: col,
-          stack,
-          capacity: 3,
-          active: true,
-          sortOrder: sortOrder++,
-        });
+        for (let slot = 1; slot <= 3; slot++) {
+          const slotLocId = formatSlotLocationId(rack.id, stack, col, slot);
+          locations.push({
+            locationId: slotLocId,
+            siteId: 'WH2',
+            type: 'RACK_SLOT',
+            displayName: `Rak ${rack.id} Kolom ${col} Tingkat ${stack} Slot ${slot}`,
+            rackNo: parseInt(rack.id.replace('R', ''), 10),
+            columnNo: col,
+            stack,
+            capacity: 1,
+            active: true,
+            sortOrder: sortOrder++,
+          });
+        }
       });
     }
   });
@@ -335,7 +337,9 @@ export function generateMachineDataset(): { machines: Machine[]; movements: Move
 
     // Asset code pattern: IDN-{dept}-{YYMM}-{index}
     const dept = (i % 3) + 8; // 8, 9, 10
-    const yearMonth = 2000 + (i % 24) + ((i % 12) + 1).toString().padStart(2, '0');
+    const yy = String(18 + (i % 8)).padStart(2, '0'); // e.g. 18..25
+    const mm = String((i % 12) + 1).padStart(2, '0');
+    const yearMonth = `${yy}${mm}`; // YYMM format e.g. 2509
     const assetSeq = String(1000 + i).padStart(4, '0');
     const assetCode = `IDN-${dept}-${yearMonth}-${assetSeq}`;
 
@@ -370,10 +374,10 @@ export function generateMachineDataset(): { machines: Machine[]; movements: Move
     } else if (modVal < 98) {
       siteId = 'WH2';
       homeFactory = i % 2 === 0 ? 'PT.WINNERS(1)' : 'PT.WINNERS(2)';
-      const slotIndex = i % wh2Slots.length;
+      const slotIndex = (i * 7) % wh2Slots.length;
       const targetSlot = wh2Slots[slotIndex];
       const curCount = slotCountMap.get(targetSlot) || 0;
-      if (curCount < 3) {
+      if (curCount < 1) {
         locationId = targetSlot;
         slotCountMap.set(targetSlot, curCount + 1);
       } else {

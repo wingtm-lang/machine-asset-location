@@ -51,6 +51,7 @@ class StorageService {
   private barcodeMap = new Map<string, Machine>();
   private assetCodeMap = new Map<string, Machine>();
   private listeners: Array<() => void> = [];
+  private syncStatusListeners: Array<(isSyncing: boolean) => void> = [];
   private isAutoSyncing = false;
   private lastAutoSyncTime: number = 0;
 
@@ -58,12 +59,7 @@ class StorageService {
 
   constructor() {
     this.init();
-    if (typeof window !== 'undefined') {
-      // Auto-sync in background on startup (after 1.5s to let UI render instantly)
-      setTimeout(() => {
-        this.triggerAutoBackgroundSync();
-      }, 1500);
-    }
+    // Timer otomatis di konstruktor telah dihapus agar sync dipicu setelah login / restore sesi
   }
 
   public subscribe(fn: () => void): () => void {
@@ -71,6 +67,28 @@ class StorageService {
     return () => {
       this.listeners = this.listeners.filter((l) => l !== fn);
     };
+  }
+
+  public subscribeSyncStatus(fn: (isSyncing: boolean) => void): () => void {
+    this.syncStatusListeners.push(fn);
+    fn(this.isAutoSyncing);
+    return () => {
+      this.syncStatusListeners = this.syncStatusListeners.filter((l) => l !== fn);
+    };
+  }
+
+  private notifySyncStatus(isSyncing: boolean) {
+    for (const listener of this.syncStatusListeners) {
+      try {
+        listener(isSyncing);
+      } catch (e) {
+        console.error('Error notifying sync status listener:', e);
+      }
+    }
+  }
+
+  public getIsSyncing(): boolean {
+    return this.isAutoSyncing;
   }
 
   private notifyListeners() {
@@ -84,26 +102,47 @@ class StorageService {
   }
 
   /**
-   * Auto background sync: berjalan otomatis saat web dibuka di perangkat mana pun
+   * Auto background sync: berjalan otomatis saat dipanggil setelah login / sesi pulih
+   * @param force Jika true, lewati batas jeda throttle 15 detik
    */
-  public async triggerAutoBackgroundSync() {
-    if (this.isAutoSyncing) return;
+  public async triggerAutoBackgroundSync(force: boolean = false): Promise<boolean> {
+    if (this.isAutoSyncing) return false;
     const now = Date.now();
-    // Cegah spam sync (minimal jeda 15 detik)
-    if (now - this.lastAutoSyncTime < 15000) return;
+    // Cegah spam sync (minimal jeda 15 detik), kecuali dipaksa (force = true)
+    if (!force && now - this.lastAutoSyncTime < 15000) return false;
 
     this.isAutoSyncing = true;
+    this.notifySyncStatus(true);
     try {
       const res = await this.syncFromGoogleSheet(this.settings.spreadsheetId, 'machine_asset');
       if (res.success) {
         this.lastAutoSyncTime = Date.now();
         this.notifyListeners();
       }
+      return Boolean(res.success);
     } catch (err) {
       console.warn('Background auto-sync check completed with offline fallback.', err);
+      return false;
     } finally {
       this.isAutoSyncing = false;
+      this.notifySyncStatus(false);
     }
+  }
+
+  /**
+   * Membersihkan seluruh cache data mesin lokal saat pengguna logout
+   * agar tidak terjadi sisa data lokal antar pengguna yang berbeda di perangkat yang sama
+   */
+  public clearLocalMachineCache() {
+    this.machines = [];
+    this.movements = [];
+    this.transfers = [];
+    this.statusLogs = [];
+    this.opnameSessions = [];
+    this.opnameItems = [];
+    this.rebuildIndices();
+    this.save();
+    this.notifyListeners();
   }
 
   public init() {

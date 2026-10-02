@@ -15,6 +15,39 @@ export interface GasAuthUser {
 
 export type UserServerRole = 'ADMIN_MASTER' | 'ALL_SITES' | 'FACTORY' | 'UNKNOWN';
 
+export interface ServerMovementRecord {
+  historyId: string;
+  barcode?: string;
+  assetCode?: string;
+  serial?: string;
+  machineName?: string;
+  fromLocation?: string;
+  toLocation?: string;
+  fromSite?: string;
+  toSite?: string;
+  status?: string;
+  reason?: string;
+  movedBy?: string;
+  timestamp: string; // "yyyy-MM-dd HH:mm:ss"
+  notes?: string;
+  isUndone?: boolean;
+}
+
+export interface GetMovementsParams {
+  assetCode?: string;
+  site?: string;
+  from?: string; // "yyyy-MM-dd"
+  to?: string;   // "yyyy-MM-dd"
+  limit?: number; // default 200, max 1000
+}
+
+export interface GetMovementsResponse {
+  success: boolean;
+  hasMore?: boolean;
+  movements?: ServerMovementRecord[];
+  message?: string;
+}
+
 export interface GasManagedUser {
   nik: string;
   profile: string;
@@ -431,6 +464,54 @@ export const gasAuthService = {
         success: false,
         users: [],
         message: 'Tidak dapat terhubung ke server. Coba lagi.',
+      };
+    }
+  },
+
+  /**
+   * 9) GET_MOVEMENTS { assetCode?, site?, from?, to?, limit? }
+   * Mengambil riwayat mutasi/perpindahan mesin langsung dari server GAS.
+   * from/to berformat "yyyy-MM-dd"; limit default 200, maks 1000.
+   */
+  async getMovements(params: GetMovementsParams = {}): Promise<GetMovementsResponse> {
+    try {
+      const cleanParams: Record<string, any> = {};
+      if (params.assetCode && params.assetCode.trim()) {
+        cleanParams.assetCode = params.assetCode.trim();
+      }
+      if (params.site && params.site.trim() && params.site !== 'ALL' && params.site !== 'Semua') {
+        cleanParams.site = params.site.trim();
+      }
+      if (params.from && params.from.trim()) {
+        cleanParams.from = params.from.trim();
+      }
+      if (params.to && params.to.trim()) {
+        cleanParams.to = params.to.trim();
+      }
+      cleanParams.limit = typeof params.limit === 'number' ? Math.min(Math.max(1, params.limit), 1000) : 200;
+
+      const res = await postGasApi<GetMovementsResponse>('GET_MOVEMENTS', cleanParams);
+      if (res && res.success) {
+        return {
+          success: true,
+          hasMore: Boolean(res.hasMore),
+          movements: Array.isArray(res.movements) ? res.movements : [],
+          message: res.message,
+        };
+      }
+
+      return {
+        success: false,
+        hasMore: false,
+        movements: [],
+        message: res?.message || 'Gagal mengambil riwayat pemindahan dari server.',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        hasMore: false,
+        movements: [],
+        message: err.message || 'Tidak dapat terhubung ke server untuk mengambil riwayat mesin.',
       };
     }
   },

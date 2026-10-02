@@ -4,79 +4,83 @@
  * Contoh: WH2-R4-B12-S2 (Rak R4, Tingkat B, Kolom 12, Slot 2)
  */
 
-import { postGasApi, getGasBaseUrl } from './gasAuthService';
+import { postGasApi } from './gasAuthService';
 import { storageService } from './storage';
+import {
+  WH2RackId,
+  RackLevel,
+  RackConfig,
+  WH2_RACKS,
+  RACK_LEVELS,
+  RACK_MAX_COLUMNS,
+  RackSlotItem,
+  MachineSearchResult,
+  RackIssue,
+  SelectedColumnCoord,
+  formatSlotLocationId,
+  parseSlotLocationId,
+  formatRackDisplay,
+} from '../types/wh2Rack';
+
+// Re-export all WH2 rack types and constants so existing imports work seamlessly
+export {
+  WH2_RACKS,
+  RACK_LEVELS,
+  RACK_MAX_COLUMNS,
+  formatSlotLocationId,
+  parseSlotLocationId,
+  formatRackDisplay,
+};
+export type {
+  WH2RackId,
+  RackLevel,
+  RackConfig,
+  RackSlotItem,
+  MachineSearchResult,
+  RackIssue,
+  SelectedColumnCoord,
+};
 
 export const callGasApi = postGasApi;
-
-export interface RackSlotItem {
-  assetCode: string;
-  barcode?: string;
-  serial?: string;
-  name?: string;
-  site?: string;
-  rak: string; // "R1".."R6"
-  tingkat: 'A' | 'B' | 'C' | string;
-  kolom: number;
-  slot: number; // 1..3
-}
-
-export interface MachineSearchResult {
-  assetCode: string;
-  barcode?: string;
-  serial?: string;
-  standardMachineName?: string;
-  manufacturer?: string;
-  model?: string;
-  locationId: string;
-  siteId: string;
-  status: string;
-}
-
-export interface RackConfig {
-  id: string; // "R1".."R6"
-  n: number;  // jumlah kolom
-  l: number;  // left %
-  t: number;  // top %
-  w: number;  // width %
-  h: number;  // height %
-}
-
-export const WH2_RACKS: RackConfig[] = [
-  { id: 'R1', n: 32, l: 49,   t: 8,  w: 48, h: 26 },
-  { id: 'R2', n: 28, l: 50.5, t: 44, w: 43, h: 23 },
-  { id: 'R3', n: 28, l: 50.5, t: 71, w: 43, h: 23 },
-  { id: 'R4', n: 26, l: 3,    t: 8,  w: 42, h: 26 },
-  { id: 'R5', n: 15, l: 21,   t: 44, w: 25, h: 23 },
-  { id: 'R6', n: 15, l: 21,   t: 71, w: 25, h: 23 },
-];
-
-export const RACK_LEVELS: ('C' | 'B' | 'A')[] = ['C', 'B', 'A'];
 
 export const rackMapService = {
   /**
    * GET_RACK_MAP
-   * Mengambil data slot rak WH2 dari server GAS.
+   * Mengambil data slot rak WH2 dari server GAS beserta issues/data bermasalah.
    * Tidak ada fallback lokal; bila server gagal, kembalikan error.
    */
-  async getRackMap(): Promise<{ success: boolean; slots: RackSlotItem[]; message?: string }> {
+  async getRackMap(): Promise<{
+    success: boolean;
+    slots: RackSlotItem[];
+    issues: RackIssue[];
+    message?: string;
+  }> {
     try {
-      const res = await postGasApi<{ success: boolean; slots?: RackSlotItem[]; message?: string }>(
-        'GET_RACK_MAP',
-        {}
-      );
+      const res = await postGasApi<{
+        success: boolean;
+        slots?: RackSlotItem[];
+        issues?: RackIssue[];
+        message?: string;
+      }>('GET_RACK_MAP', {});
+
       if (res && res.success && Array.isArray(res.slots)) {
-        return { success: true, slots: res.slots };
+        return {
+          success: true,
+          slots: res.slots,
+          issues: Array.isArray(res.issues) ? res.issues : [],
+        };
       }
       return {
         success: false,
         slots: [],
+        issues: [],
         message: res?.message || 'Gagal memuat mapping rak WH2 dari server.',
       };
     } catch (err: any) {
       return {
         success: false,
         slots: [],
+        issues: [],
         message: err.message || 'Tidak dapat terhubung ke server untuk memuat rak WH2.',
       };
     }
@@ -104,7 +108,7 @@ export const rackMapService = {
         message: res?.message || `Mesin dengan kata kunci "${cleanQuery}" tidak ditemukan di server.`,
       };
     } catch {
-      // Fallback pencarian lokal jika jaringan gagal
+      // Fallback pencarian lokal jika jaringan tidak tersedia
       const machines = storageService.getAllMachines();
       const qUpper = cleanQuery.toUpperCase();
 
@@ -138,7 +142,7 @@ export const rackMapService = {
 
   /**
    * ASSIGN_RACK_SLOT params: { assetCode, siteId:"WH2", rak, tingkat, kolom, slot }
-   * Hanya diterapkan di lokal bila respons server success: true
+   * Hanya mengandalkan server GAS (tidak menulis cache lokal direct mutation).
    */
   async assignRackSlot(params: {
     assetCode: string;
@@ -147,11 +151,11 @@ export const rackMapService = {
     tingkat: string;
     kolom: number;
     slot: number;
-    byUser: string;
+    byUser?: string;
   }): Promise<{ success: boolean; message: string }> {
-    const { assetCode, rak, tingkat, kolom, slot, byUser } = params;
+    const { assetCode, rak, tingkat, kolom, slot } = params;
     const siteId = params.siteId || 'WH2';
-    const newLocationId = `WH2-${rak}-${tingkat}${kolom}-S${slot}`;
+    const newLocationId = formatSlotLocationId(rak, tingkat, kolom, slot);
 
     try {
       const res = await postGasApi<{ success: boolean; message: string }>('ASSIGN_RACK_SLOT', {
@@ -161,16 +165,10 @@ export const rackMapService = {
         tingkat,
         kolom,
         slot,
+        byUser: params.byUser,
       });
 
       if (res && res.success) {
-        storageService.setMachineLocationDirect({
-          assetCode,
-          locationId: newLocationId,
-          siteId: 'WH2',
-          username: byUser,
-          reason: `Ditempatkan di slot rak ${newLocationId}`,
-        });
         return {
           success: true,
           message: res.message || `Mesin ${assetCode} berhasil ditempatkan di posisi ${newLocationId}.`,
@@ -204,16 +202,10 @@ export const rackMapService = {
         siteId: 'WH2',
         status: machine?.status || 'ACTIVE',
         reason: 'Dikeluarkan dari rak',
+        byUser,
       });
 
       if (res && res.success) {
-        storageService.setMachineLocationDirect({
-          assetCode,
-          locationId: 'WH2-UNASSIGNED',
-          siteId: 'WH2',
-          username: byUser,
-          reason: 'Dikeluarkan dari rak',
-        });
         return {
           success: true,
           message: res.message || `Mesin ${assetCode} berhasil dikeluarkan dari rak.`,
@@ -239,14 +231,14 @@ export const rackMapService = {
     try {
       const res = await postGasApi<{ success: boolean; message: string }>('UNDO_MOVE', {
         assetCode,
+        byUser,
       });
 
       if (res && res.success) {
-        return await storageService.undoLastMove({
-          assetCode,
-          username: byUser,
-          isAdmin: true,
-        });
+        return {
+          success: true,
+          message: res.message || `Penempatan mesin ${assetCode} berhasil dibatalkan.`,
+        };
       }
 
       return {

@@ -11,6 +11,7 @@ import {
   Boxes,
   ArrowRightLeft,
   ClipboardCheck,
+  History,
   FileText,
   ShieldAlert,
   LayoutDashboard,
@@ -22,7 +23,6 @@ import { useAuth } from '../services/authContext';
 import { useTheme } from '../services/themeContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
-import { PtWinnersLogo } from './PtWinnersLogo';
 
 interface NavbarProps {
   currentTab?: string;
@@ -57,6 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'move', labelKey: 'move', icon: Layers, show: canPerformAction('MOVE') || canPerformAction('CHANGE_STATUS') },
     { id: 'transfers', labelKey: 'transfers', icon: ArrowRightLeft, show: canPerformAction('TRANSFER') },
     { id: 'opname', labelKey: 'opname', icon: ClipboardCheck, show: canPerformAction('OPNAME') },
+    { id: 'history', labelKey: 'history', icon: History, show: true },
     { id: 'reports', labelKey: 'reports', icon: FileText, show: canPerformAction('REPORTS') },
     { id: 'admin', labelKey: 'admin', icon: ShieldAlert, show: canPerformAction('ADMIN') },
   ];
@@ -97,8 +98,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => handleTabSelect('dashboard')}
               className="flex items-center gap-2.5 text-left group focus:outline-none"
             >
-              <div className="w-10 h-10 rounded-xl bg-white p-0.5 shadow-lg group-hover:scale-105 transition-transform flex items-center justify-center shrink-0 border border-white/20 overflow-hidden">
-                <PtWinnersLogo className="w-9 h-9 object-contain" />
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-400 to-teal-200 p-0.5 shadow-lg group-hover:scale-105 transition-transform">
+                <div className="w-full h-full bg-[#064e3b] rounded-[10px] flex items-center justify-center">
+                  <Building2 className="w-5 h-5 text-emerald-300" />
+                </div>
               </div>
               <div>
                 <div className="flex items-center gap-1.5">

@@ -15,13 +15,16 @@ import {
   Layers,
   ArrowRightLeft,
   ClipboardCheck,
+  History,
   FileText,
   Users,
   ShieldAlert,
+  Loader2,
 } from 'lucide-react';
 
 interface AppHeaderProps {
   activeTab: string;
+  isSyncing?: boolean;
   onOpenMobileSidebar: () => void;
   onOpenScanner: () => void;
   onOpenBenchmark: () => void;
@@ -37,13 +40,15 @@ const TAB_TITLES: Record<string, { title: string; subtitle: string; icon: any }>
   move: { title: 'Pindahkan Lokasi', subtitle: 'Mutasi Posisi Line & Rak', icon: Layers },
   transfers: { title: 'Transfer Antar Site', subtitle: 'Kirim & Terima Antar Pabrik', icon: ArrowRightLeft },
   opname: { title: 'Stok Opname', subtitle: 'Rekonsiliasi Fisik Mesin', icon: ClipboardCheck },
-  reports: { title: 'Laporan & Riwayat', subtitle: 'Log Mutasi & Riwayat Transfer', icon: FileText },
+  history: { title: 'Riwayat Mesin', subtitle: 'Log Riwayat Pemindahan Mesin dari Server', icon: History },
+  reports: { title: 'Laporan Harian', subtitle: 'Rekapitulasi Harian & Pengaturan Notifikasi Email', icon: FileText },
   users: { title: 'Kelola Pengguna', subtitle: 'Manajemen Akun & Otoritas', icon: Users },
   admin: { title: 'Admin & Integrasi GAS', subtitle: 'Sinkronisasi Backend Google Sheet', icon: ShieldAlert },
 };
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
   activeTab,
+  isSyncing,
   onOpenMobileSidebar,
   onOpenScanner,
   onOpenBenchmark,
@@ -102,6 +107,17 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Sisi Kanan: Action Buttons & Profil User */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Spinner Kecil Tanda Auto-Sync */}
+          {isSyncing && (
+            <div
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl bg-[#ffd23f]/15 border border-[#ffd23f]/35 text-[#ffd23f] text-xs font-mono font-semibold animate-pulse"
+              title="Sedang menyinkronkan data mesin dari server..."
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#ffd23f]" />
+              <span className="hidden md:inline text-[11px]">Syncing...</span>
+            </div>
+          )}
+
           {/* Tombol Scan QR / Barcode Cepat Aksen Emas Blueprint */}
           <button
             type="button"

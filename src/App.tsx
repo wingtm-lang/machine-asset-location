@@ -17,6 +17,7 @@ import { MachinesListView } from './views/MachinesListView';
 import { MoveView } from './views/MoveView';
 import { TransfersView } from './views/TransfersView';
 import { OpnameView } from './views/OpnameView';
+import { HistoryView } from './views/HistoryView';
 import { ReportsView } from './views/ReportsView';
 import { AdminView } from './views/AdminView';
 import { Machine } from './types';
@@ -42,15 +43,29 @@ const MainAppInner: React.FC = () => {
   // Navigation state: Default to 'home' (Beranda)
   const [activeTab, setActiveTab] = useState<string>('home');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [, setSyncTick] = useState<number>(0);
 
-  // Auto-subscribe to storage database changes
+  // Auto-subscribe to storage database changes and sync status
   useEffect(() => {
-    const unsubscribe = storageService.subscribe(() => {
+    const unsubStorage = storageService.subscribe(() => {
       setSyncTick((prev) => prev + 1);
     });
-    return () => unsubscribe();
+    const unsubSync = storageService.subscribeSyncStatus((syncing) => {
+      setIsSyncing(syncing);
+    });
+    return () => {
+      unsubStorage();
+      unsubSync();
+    };
   }, []);
+
+  // Sync data otomatis setelah login atau setelah sesi dipulihkan (dengan parameter force = true)
+  useEffect(() => {
+    if (!isLoadingSession && currentUser) {
+      storageService.triggerAutoBackgroundSync(true);
+    }
+  }, [isLoadingSession, currentUser?.username]);
 
   // Modals state
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState<boolean>(false);
@@ -148,6 +163,7 @@ const MainAppInner: React.FC = () => {
         {/* Sleek Topbar Header */}
         <AppHeader
           activeTab={activeTab}
+          isSyncing={isSyncing}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           onOpenScanner={() => setIsScannerOpen(true)}
           onOpenBenchmark={() => setIsBenchmarkOpen(true)}
@@ -237,7 +253,42 @@ const MainAppInner: React.FC = () => {
           <OpnameView onOpenScanner={() => setIsScannerOpen(true)} />
         )}
 
-        {activeTab === 'reports' && <ReportsView />}
+        {/* Modul: Riwayat Mesin (Terbuka untuk semua user yang login) */}
+        {activeTab === 'history' && (
+          <HistoryView
+            onSelectMachine={(code) => {
+              const res = storageService.getMachineByCode(code);
+              if (res.machine) handleOpenDetail(res.machine);
+            }}
+          />
+        )}
+
+        {/* Modul: Laporan Harian (Dengan Guard canPerformAction('REPORTS')) */}
+        {activeTab === 'reports' && (
+          canPerformAction('REPORTS') ? (
+            <ReportsView />
+          ) : (
+            <div className="max-w-xl mx-auto py-16 px-4 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs my-6">
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto mb-4 border border-amber-200 dark:border-amber-800">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                Anda tidak memiliki akses ke halaman ini
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
+                Akun Anda ({currentUser.role}) dibatasi hanya untuk site {currentUser.siteAccess.join(', ')}.
+                Modul Laporan Harian khusus untuk Admin Master dan All Sites.
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('home')}
+                className="mt-6 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer"
+              >
+                Kembali ke Beranda
+              </button>
+            </div>
+          )
+        )}
 
         {activeTab === 'admin' && (canAddUser || canPerformAction('ADMIN')) && <AdminView />}
       </main>

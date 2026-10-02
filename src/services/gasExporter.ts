@@ -316,6 +316,14 @@ function handleMoveMachine(user, params) {
     return { success: false, message: 'Mesin ' + (targetAsset || targetBarcode) + ' tidak ditemukan di sheet' };
   }
 
+  // Validasi target rak WH2 jika lokasi mengarah ke slot rak
+  if (targetLoc) {
+    var rackErr = validateRackTarget(targetLoc, data, indices, rowIndex);
+    if (rackErr) {
+      return { success: false, message: rackErr };
+    }
+  }
+
   var currentRow = data[rowIndex - 1];
   var fromLoc = indices.locationId !== -1 ? String(currentRow[indices.locationId] || '') : 'UNKNOWN';
   var fromSite = indices.siteId !== -1 ? String(currentRow[indices.siteId] || '') : 'PW1';
@@ -422,6 +430,12 @@ function handleUndoMove(user, params) {
   var timestampStr = formatCurrentDateTime();
 
   if (mRow !== -1) {
+    if (originalLoc) {
+      var undoRackErr = validateRackTarget(originalLoc, mData, indices, mRow);
+      if (undoRackErr) {
+        return { success: false, message: 'Tidak dapat mengembalikan lokasi ke ' + originalLoc + ': ' + undoRackErr };
+      }
+    }
     if (indices.locationId !== -1) mSheet.getRange(mRow, indices.locationId + 1).setValue(originalLoc);
     if (indices.siteId !== -1 && originalSite) mSheet.getRange(mRow, indices.siteId + 1).setValue(originalSite);
     if (indices.lastMovedAt !== -1) mSheet.getRange(mRow, indices.lastMovedAt + 1).setValue(timestampStr);
@@ -527,6 +541,10 @@ function handleReceiveTransfer(user, params) {
   var toSite = params.toSite || '';
   var receivedBy = (user && user.username) ? user.username : (params.receivedBy || 'Admin');
   var timestampStr = formatCurrentDateTime();
+
+  if (toLocationId && String(toLocationId).trim().toUpperCase().indexOf('WH2-R') === 0) {
+    return { success: false, message: 'Terima ke WH2-UNASSIGNED dulu, lalu tempatkan di rak.' };
+  }
 
   var indices = getSheetColumnIndices(mSheet);
   indices = ensureTrackingColumns(mSheet, indices);
@@ -873,38 +891,142 @@ var RACK_MAX_COL = { R1: 32, R2: 28, R3: 28, R4: 26, R5: 15, R6: 15 };
 var RACK_LEVELS = ['A', 'B', 'C'];
 var RACK_MAX_SLOT = 3;
 
+function parseRackLoc(loc) {
+  if (!loc) return null;
+  var re = /^WH2-(R[1-6])-([ABC])(\d+)-S([1-3])$/i;
+  var m = re.exec(String(loc).trim());
+  if (!m) return null;
+  var rak = m[1].toUpperCase();
+  var tingkat = m[2].toUpperCase();
+  var kolom = Number(m[3]);
+  var slot = Number(m[4]);
+  return {
+    rak: rak,
+    tingkat: tingkat,
+    kolom: kolom,
+    slot: slot,
+    locationId: 'WH2-' + rak + '-' + tingkat + kolom + '-S' + slot
+  };
+}
+
+function validateRackTarget(loc, data, idx, excludeRow) {
+  if (!loc) return null;
+  var strLoc = String(loc).trim();
+  if (strLoc.toUpperCase().indexOf('WH2-R') !== 0) {
+    return null; // Bukan lokasi slot rak (mis. WH2-UNASSIGNED atau site lain)
+  }
+
+  var parsed = parseRackLoc(strLoc);
+  if (!parsed) {
+    return 'Format lokasi rak salah: "' + strLoc + '". Format yang valid: WH2-R[1-6]-[A-C][kolom]-S[1-3] (contoh: WH2-R4-B12-S2)';
+  }
+
+  var maxCol = RACK_MAX_COL[parsed.rak];
+  if (!maxCol) {
+    return 'Rak tidak valid: ' + parsed.rak;
+  }
+  if (parsed.kolom < 1 || parsed.kolom > maxCol) {
+    return 'Kolom ' + parsed.kolom + ' di luar rentang rak ' + parsed.rak + ' (1-' + maxCol + ')';
+  }
+  if (parsed.slot < 1 || parsed.slot > RACK_MAX_SLOT) {
+    return 'Slot tidak valid (harus 1-' + RACK_MAX_SLOT + ')';
+  }
+
+  // Cek duplikasi slot terisi di data sheet
+  if (idx && idx.locationId !== -1 && data) {
+    var targetUpper = parsed.locationId.toUpperCase();
+    for (var r = 1; r < data.length; r++) {
+      if (excludeRow && (r + 1) === excludeRow) continue;
+      var curLoc = String(data[r][idx.locationId] || '').trim().toUpperCase();
+      if (curLoc === targetUpper) {
+        var occupant = idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : ('baris ' + (r + 1));
+        return 'Slot ' + parsed.locationId + ' sudah dipakai mesin ' + occupant;
+      }
+    }
+  }
+
+  return null;
+}
+
 function handleGetRackMap(user, params) {
   var sh = getMachineAssetSheet(getSpreadsheet());
   var idx = getSheetColumnIndices(sh);
   var data = idx.data;
 
   if (idx.locationId === -1) {
-    return { success: false, message: 'Kolom Location ID tidak ditemukan' };
+    return { success: false, message: 'Kolom Location ID tidak ditemukan', slots: [], issues: [] };
   }
 
-  var re = /^WH2-(R[1-6])-([ABC])(\d+)-S([1-3])$/i;
   var slots = [];
+  var issues = [];
+  var seenSlots = {};
 
   for (var r = 1; r < data.length; r++) {
     var loc = String(data[r][idx.locationId] || '').trim();
-    var m = re.exec(loc);
-    if (!m) continue;
+    if (!loc || loc.toUpperCase().indexOf('WH2-R') !== 0) continue;
 
+    var aCode = idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : '';
+    var bCode = idx.barcode !== -1 ? String(data[r][idx.barcode] || '').trim() : '';
+    var sNum = idx.serial !== -1 ? String(data[r][idx.serial] || '').trim() : '';
+    var mName = idx.standardMachineName !== -1 ? String(data[r][idx.standardMachineName] || '').trim() : '';
+    var model = idx.model !== -1 ? String(data[r][idx.model] || '').trim() : '';
+    var rawStatus = idx.status !== -1 ? String(data[r][idx.status] || '').trim().toUpperCase() : 'ACTIVE';
+
+    var parsed = parseRackLoc(loc);
+    if (!parsed) {
+      issues.push({
+        row: r + 1,
+        assetCode: aCode,
+        locationId: loc,
+        problem: 'FORMAT_TIDAK_VALID'
+      });
+      continue;
+    }
+
+    var maxCol = RACK_MAX_COL[parsed.rak];
+    if (!maxCol || parsed.kolom < 1 || parsed.kolom > maxCol) {
+      issues.push({
+        row: r + 1,
+        assetCode: aCode,
+        locationId: loc,
+        problem: 'KOLOM_DILUAR_RENTANG'
+      });
+      continue;
+    }
+
+    var normId = parsed.locationId;
+    if (seenSlots[normId]) {
+      issues.push({
+        row: r + 1,
+        assetCode: aCode,
+        locationId: loc,
+        problem: 'DUPLIKAT_SLOT'
+      });
+      continue;
+    }
+
+    seenSlots[normId] = true;
     slots.push({
-      assetCode: idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : '',
-      barcode: idx.barcode !== -1 ? String(data[r][idx.barcode] || '').trim() : '',
-      serial: idx.serial !== -1 ? String(data[r][idx.serial] || '').trim() : '',
-      name: idx.standardMachineName !== -1 ? String(data[r][idx.standardMachineName] || '').trim() : '',
-      model: idx.model !== -1 ? String(data[r][idx.model] || '').trim() : '',
+      assetCode: aCode,
+      barcode: bCode,
+      serial: sNum,
+      name: mName,
+      model: model,
+      status: rawStatus || 'ACTIVE',
       site: RACK_SITE,
-      rak: m[1].toUpperCase(),
-      tingkat: m[2].toUpperCase(),
-      kolom: Number(m[3]),
-      slot: Number(m[4])
+      rak: parsed.rak,
+      tingkat: parsed.tingkat,
+      kolom: parsed.kolom,
+      slot: parsed.slot
     });
   }
 
-  return { success: true, total: slots.length, slots: slots };
+  return {
+    success: true,
+    total: slots.length,
+    slots: slots,
+    issues: issues
+  };
 }
 
 function handleAssignRackSlot(user, params) {
@@ -919,19 +1041,6 @@ function handleAssignRackSlot(user, params) {
   var tingkat = String(params.tingkat || '').trim().toUpperCase();
   var kolom = Number(params.kolom);
   var slot = Number(params.slot);
-
-  if (!RACK_MAX_COL[rak]) {
-    return { success: false, message: 'Rak tidak valid: ' + rak };
-  }
-  if (RACK_LEVELS.indexOf(tingkat) === -1) {
-    return { success: false, message: 'Tingkat tidak valid: ' + tingkat + ' (harus A, B, atau C)' };
-  }
-  if (!isFinite(kolom) || kolom < 1 || kolom > RACK_MAX_COL[rak] || kolom % 1 !== 0) {
-    return { success: false, message: 'Kolom tidak valid. Rak ' + rak + ' memiliki kolom 1-' + RACK_MAX_COL[rak] };
-  }
-  if (!isFinite(slot) || slot < 1 || slot > RACK_MAX_SLOT || slot % 1 !== 0) {
-    return { success: false, message: 'Slot tidak valid (harus 1-' + RACK_MAX_SLOT + ')' };
-  }
 
   var targetLoc = RACK_SITE + '-' + rak + '-' + tingkat + kolom + '-S' + slot;
 
@@ -970,14 +1079,9 @@ function handleAssignRackSlot(user, params) {
     return { success: false, message: 'Mesin ' + machineAsset + ' sudah berada di slot ini' };
   }
 
-  if (idx.locationId !== -1) {
-    for (var r = 1; r < data.length; r++) {
-      var loc = String(data[r][idx.locationId] || '').trim();
-      if (loc.toUpperCase() === targetLoc.toUpperCase() && (r + 1) !== rowIndex) {
-        var occupant = idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : ('baris ' + (r + 1));
-        return { success: false, message: 'Slot ' + targetLoc + ' sudah terisi oleh ' + occupant };
-      }
-    }
+  var validateErr = validateRackTarget(targetLoc, data, idx, rowIndex);
+  if (validateErr) {
+    return { success: false, message: validateErr };
   }
 
   var moveParams = {
@@ -997,6 +1101,145 @@ function handleAssignRackSlot(user, params) {
     result.locationId = targetLoc;
   }
   return result;
+}
+
+function auditRackLocations() {
+  var sh = getMachineAssetSheet(getSpreadsheet());
+  var idx = getSheetColumnIndices(sh);
+  var data = idx.data;
+  var report = {
+    totalWh2Rows: 0,
+    validSlots: 0,
+    legacyCount: 0,
+    invalidCount: 0,
+    duplicateCount: 0,
+    issues: []
+  };
+
+  var seen = {};
+  var legacyRe = /^WH2-(R[1-6])-(\d+)([ABC])$/i; // e.g. WH2-R1-1A
+
+  for (var r = 1; r < data.length; r++) {
+    var loc = String(data[r][idx.locationId] || '').trim();
+    if (!loc || loc.toUpperCase().indexOf('WH2-R') !== 0) continue;
+    report.totalWh2Rows++;
+
+    var aCode = idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : '';
+    var parsed = parseRackLoc(loc);
+
+    if (parsed) {
+      var maxCol = RACK_MAX_COL[parsed.rak];
+      if (parsed.kolom < 1 || parsed.kolom > maxCol) {
+        report.invalidCount++;
+        report.issues.push({ row: r + 1, assetCode: aCode, locationId: loc, problem: 'KOLOM_DILUAR_RENTANG' });
+      } else if (seen[parsed.locationId]) {
+        report.duplicateCount++;
+        report.issues.push({ row: r + 1, assetCode: aCode, locationId: loc, problem: 'DUPLIKAT_SLOT' });
+      } else {
+        seen[parsed.locationId] = true;
+        report.validSlots++;
+      }
+    } else {
+      var legM = legacyRe.exec(loc);
+      if (legM) {
+        report.legacyCount++;
+        report.issues.push({ row: r + 1, assetCode: aCode, locationId: loc, problem: 'FORMAT_LEGACY' });
+      } else {
+        report.invalidCount++;
+        report.issues.push({ row: r + 1, assetCode: aCode, locationId: loc, problem: 'FORMAT_TIDAK_VALID' });
+      }
+    }
+  }
+
+  Logger.log("=== AUDIT RACK LOCATIONS REPORT ===");
+  Logger.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+function migrateRackDryRun() {
+  var sh = getMachineAssetSheet(getSpreadsheet());
+  var idx = getSheetColumnIndices(sh);
+  var data = idx.data;
+
+  var occupied = {};
+  for (var r = 1; r < data.length; r++) {
+    var loc = String(data[r][idx.locationId] || '').trim();
+    var p = parseRackLoc(loc);
+    if (p) occupied[p.locationId.toUpperCase()] = true;
+  }
+
+  var legacyRe = /^WH2-(R[1-6])-(\d+)([ABC])$/i; // WH2-R1-1A
+  var plans = [];
+
+  for (var r = 1; r < data.length; r++) {
+    var loc = String(data[r][idx.locationId] || '').trim();
+    var m = legacyRe.exec(loc);
+    if (!m) continue;
+
+    var rak = m[1].toUpperCase();
+    var col = Number(m[2]);
+    var level = m[3].toUpperCase();
+    var aCode = idx.assetCode !== -1 ? String(data[r][idx.assetCode] || '').trim() : '';
+
+    var assignedLoc = null;
+    for (var s = 1; s <= 3; s++) {
+      var candidate = 'WH2-' + rak + '-' + level + col + '-S' + s;
+      if (!occupied[candidate.toUpperCase()]) {
+        assignedLoc = candidate;
+        occupied[candidate.toUpperCase()] = true;
+        break;
+      }
+    }
+
+    if (assignedLoc) {
+      plans.push({
+        row: r + 1,
+        assetCode: aCode,
+        from: loc,
+        to: assignedLoc
+      });
+    } else {
+      plans.push({
+        row: r + 1,
+        assetCode: aCode,
+        from: loc,
+        to: 'WH2-UNASSIGNED',
+        note: 'Kolom ' + rak + '-' + level + col + ' sudah penuh (3 slot terisi)'
+      });
+    }
+  }
+
+  Logger.log("=== MIGRATE RACK DRY RUN (" + plans.length + " planned) ===");
+  plans.forEach(function(p) {
+    Logger.log("Baris " + p.row + " (" + p.assetCode + "): " + p.from + " -> " + p.to);
+  });
+  return { plannedMigrations: plans.length, plans: plans };
+}
+
+function migrateRackApply() {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+    var sh = getMachineAssetSheet(getSpreadsheet());
+    var idx = getSheetColumnIndices(sh);
+
+    var dry = migrateRackDryRun();
+    var plans = dry.plans || [];
+    var appliedCount = 0;
+
+    for (var i = 0; i < plans.length; i++) {
+      var p = plans[i];
+      sh.getRange(p.row, idx.locationId + 1).setValue(p.to);
+      appliedCount++;
+    }
+
+    Logger.log("=== MIGRATE RACK APPLY SUCCESS (" + appliedCount + " updated) ===");
+    return { success: true, appliedCount: appliedCount, message: appliedCount + ' lokasi rak legacy berhasil dimigrasi ke format baru.' };
+  } catch (err) {
+    return { success: false, message: 'Gagal migrasi rak: ' + err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ============================================================================
@@ -1425,6 +1668,95 @@ function filterSearch(res, user) {
   return res;
 }
 
+function handleGetMovements(user, params) {
+  params = params || {};
+  var ss = getSpreadsheet();
+  var hSheet = ss.getSheetByName('Movement_History');
+  if (!hSheet) {
+    return { success: true, movements: [], hasMore: false };
+  }
+
+  var data = hSheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return { success: true, movements: [], hasMore: false };
+  }
+
+  var qAsset = String(params.assetCode || '').trim().toUpperCase();
+  var qSite = String(params.site || '').trim().toUpperCase();
+  var qFrom = String(params.from || '').trim();
+  var qTo = String(params.to || '').trim();
+  var limit = Number(params.limit) || 200;
+  if (limit > 1000) limit = 1000;
+
+  var results = [];
+  for (var i = data.length - 1; i >= 1; i--) {
+    var r = data[i];
+    var hId = String(r[0] || '');
+    var bCode = String(r[1] || '');
+    var aCode = String(r[2] || '');
+    var serial = String(r[3] || '');
+    var mName = String(r[4] || '');
+    var fromLoc = String(r[5] || '');
+    var toLoc = String(r[6] || '');
+    var fromSite = String(r[7] || '');
+    var toSite = String(r[8] || '');
+    var status = String(r[9] || '');
+    var reason = String(r[10] || '');
+    var movedBy = String(r[11] || '');
+    var timestamp = String(r[12] || '');
+    var notes = String(r[13] || '');
+    var isUndone = r[14] === true || String(r[14]).toUpperCase() === 'TRUE';
+
+    // Filter hak akses site
+    if (user && user.role !== 'ADMIN_MASTER') {
+      var hasAccess = false;
+      if (fromSite && hasSite(user, fromSite)) hasAccess = true;
+      if (toSite && hasSite(user, toSite)) hasAccess = true;
+      if (!fromSite && !toSite) hasAccess = true;
+      if (!hasAccess) continue;
+    }
+
+    if (qAsset && aCode.toUpperCase() !== qAsset && bCode.toUpperCase() !== qAsset && serial.toUpperCase() !== qAsset) {
+      continue;
+    }
+    if (qSite && qSite !== 'ALL' && fromSite !== qSite && toSite !== qSite) {
+      continue;
+    }
+    if (qFrom && timestamp && timestamp.slice(0, 10) < qFrom) {
+      continue;
+    }
+    if (qTo && timestamp && timestamp.slice(0, 10) > qTo) {
+      continue;
+    }
+
+    results.push({
+      historyId: hId,
+      barcode: bCode,
+      assetCode: aCode,
+      serial: serial,
+      machineName: mName,
+      fromLocation: fromLoc,
+      toLocation: toLoc,
+      fromSite: fromSite,
+      toSite: toSite,
+      status: status,
+      reason: reason,
+      movedBy: movedBy,
+      timestamp: timestamp,
+      notes: notes,
+      isUndone: isUndone
+    });
+
+    if (results.length >= limit) break;
+  }
+
+  return {
+    success: true,
+    movements: results,
+    hasMore: data.length - 1 > results.length
+  };
+}
+
 // ---------- Router utama ----------
 function authorize(token, action, params) {
   params = params || {};
@@ -1440,17 +1772,37 @@ function authorize(token, action, params) {
     if (denied) return denied;
   }
 
+  // 1. Aksi baca murni diproses langsung tanpa antrean LockService
+  var READ_ACTIONS = {
+    GET_INITIAL_DATA: 1,
+    GET_MACHINES: 1,
+    SEARCH_MACHINE: 1,
+    GET_RACK_MAP: 1,
+    GET_MOVEMENTS: 1,
+    LIST_USERS: 1,
+    PING: 1,
+    ME: 1
+  };
+
+  if (READ_ACTIONS[action]) {
+    switch (action) {
+      case 'PING':             return { success: true, message: 'Koneksi ke Google Apps Script berhasil', timestamp: new Date().toISOString() };
+      case 'ME':               return { success: true, user: user };
+      case 'GET_INITIAL_DATA':
+      case 'GET_MACHINES':     return filterForUser(handleGetInitialData(user), user);
+      case 'SEARCH_MACHINE':   return filterSearch(handleSearchMachine(user, params.query), user);
+      case 'GET_RACK_MAP':     return handleGetRackMap(user, params);
+      case 'GET_MOVEMENTS':    return handleGetMovements(user, params);
+      case 'LIST_USERS':       return handleListUsers(user);
+    }
+  }
+
+  // 2. Aksi tulis dilindungi dengan Script Lock
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(15000);
     switch (action) {
       case 'LOGIN':            return handleLogin(params.username, params.password);
-      case 'PING':             return { success: true, message: 'Koneksi ke Google Apps Script berhasil', timestamp: new Date().toISOString() };
-      case 'ME':               return { success: true, user: user };
-
-      case 'GET_INITIAL_DATA':
-      case 'GET_MACHINES':     return filterForUser(handleGetInitialData(user), user);
-      case 'SEARCH_MACHINE':   return filterSearch(handleSearchMachine(user, params.query), user);
 
       case 'MOVE_MACHINE':
       case 'UPDATE_MACHINE':   return handleMoveMachine(user, params);
@@ -1461,13 +1813,11 @@ function authorize(token, action, params) {
       case 'SAVE_OPNAME':      return handleSaveOpname(user, params);
       case 'ADMIN_AUDIT_FIX':  return handleAdminAuditFix(user);
 
-      case 'GET_RACK_MAP':     return handleGetRackMap(user, params);
       case 'ASSIGN_RACK_SLOT': return handleAssignRackSlot(user, params);
 
       case 'ADD_USER':         return handleAddUser(user, params);
       case 'UPDATE_USER':      return handleUpdateUser(user, params);
       case 'RESET_PASSWORD':   return handleResetPassword(user, params);
-      case 'LIST_USERS':       return handleListUsers(user);
       case 'CHANGE_PASSWORD':  return handleChangePassword(user, params);
 
       default: return { success: false, message: 'Aksi tidak dikenal: ' + action };

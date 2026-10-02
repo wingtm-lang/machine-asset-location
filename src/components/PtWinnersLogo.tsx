@@ -1,33 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Building2 } from 'lucide-react';
 
-export interface PtWinnersLogoProps {
+interface PtWinnersLogoProps {
   className?: string;
-  size?: number | string;
-  style?: React.CSSProperties;
   alt?: string;
 }
 
-/**
- * PT. Winners International logo component
- * Loads from public folder (/logo-perusahaan.png)
- */
 export const PtWinnersLogo: React.FC<PtWinnersLogoProps> = ({
-  className = 'w-8 h-8',
-  size,
-  style,
-  alt = 'Logo PT. Winners',
+  className = 'w-10 h-10',
+  alt = 'PT WINNERS INTERNATIONAL',
 }) => {
-  const sizeStyle: React.CSSProperties = size
-    ? { width: size, height: size, ...style }
-    : (style || {});
+  const [imgError, setImgError] = useState(false);
+
+  if (imgError) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-gradient-to-tr from-[#0c2e57] to-[#1a4a82] text-[#ffd23f] rounded-xl shadow-xs border border-[#ffd23f]/30 ${className}`}
+        title={alt}
+      >
+        <Building2 className="w-2/3 h-2/3 text-[#ffd23f]" />
+      </div>
+    );
+  }
 
   return (
     <img
       src="/logo-perusahaan.png"
       alt={alt}
-      className={`shrink-0 select-none object-contain rounded-xs ${className}`}
-      style={sizeStyle}
-      loading="eager"
+      onError={() => setImgError(true)}
+      className={`${className} object-contain`}
     />
   );
 };

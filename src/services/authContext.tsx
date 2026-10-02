@@ -5,6 +5,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, SiteId } from '../types';
+import { storageService } from './storage';
 import {
   gasAuthService,
   getStoredToken,
@@ -72,7 +73,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     registerAuthCallbacks(
       () => {
-        // UNAUTHORIZED: Hapus sesi, kembali ke login
+        // UNAUTHORIZED: Hapus sesi, bersihkan cache mesin lokal, kembali ke login
+        storageService.clearLocalMachineCache();
         setCurrentUser(null);
         setToken(null);
         clearSession();
@@ -167,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     gasAuthService.logout();
+    storageService.clearLocalMachineCache();
     setCurrentUser(null);
     setToken(null);
   };
@@ -175,49 +178,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return await gasAuthService.changePassword(oldPasswordPlain, newPasswordPlain);
   };
 
+  // Normalisasi role server: "ADMIN_MASTER" | "ALL_SITES" | "FACTORY" / custom
+  const roleKey = String(currentUser?.role || '').toLowerCase().replace(/[\s_-]/g, '');
+  const isAdminMaster = roleKey === 'adminmaster' || roleKey === 'admin';
+  const isAllSites = roleKey === 'allsites' || roleKey === 'all';
+
   // Hak akses murni bersumber dari data server (currentUser)
   const canAddUser = Boolean(
     currentUser?.canAddUser ||
-    currentUser?.role?.toLowerCase() === 'admin master' ||
-    currentUser?.role?.toLowerCase() === 'admin'
+    isAdminMaster
   );
 
   const canUseRackMap = Boolean(
     currentUser?.canUseRackMap ||
-    (currentUser?.siteAccess && currentUser.siteAccess.includes('WH2'))
+    (currentUser?.siteAccess && (currentUser.siteAccess.includes('WH2') || currentUser.siteAccess.includes('ALL'))) ||
+    isAdminMaster ||
+    isAllSites
   );
 
   const canAccessSite = (siteId: SiteId): boolean => {
     if (!currentUser) return false;
-    const roleLower = String(currentUser.role || '').toLowerCase();
-    if (
-      roleLower === 'admin master' ||
-      roleLower === 'admin' ||
-      roleLower === 'all sites' ||
-      roleLower === 'all' ||
-      currentUser.siteAccess.includes('ALL')
-    ) {
+    const rKey = String(currentUser.role || '').toLowerCase().replace(/[\s_-]/g, '');
+    const isAdm = rKey === 'adminmaster' || rKey === 'admin';
+    const isAll = rKey === 'allsites' || rKey === 'all';
+
+    // Utamakan currentUser.siteAccess dari server
+    if (currentUser.siteAccess && currentUser.siteAccess.includes('ALL')) {
       return true;
     }
-    return currentUser.siteAccess.includes(siteId);
+    if (isAdm || isAll) {
+      return true;
+    }
+    return currentUser.siteAccess ? currentUser.siteAccess.includes(siteId) : false;
   };
 
   const canPerformAction = (
     action: 'MOVE' | 'CHANGE_STATUS' | 'TRANSFER' | 'OPNAME' | 'UNDO' | 'ADMIN' | 'REPORTS' | 'VIEW_DETAIL'
   ): boolean => {
     if (!currentUser) return false;
-    const roleLower = String(currentUser.role || '').toLowerCase();
+    const rKey = String(currentUser.role || '').toLowerCase().replace(/[\s_-]/g, '');
+    const isAdm = rKey === 'adminmaster' || rKey === 'admin';
+    const isAll = rKey === 'allsites' || rKey === 'all';
 
     switch (action) {
       case 'ADMIN':
-        return roleLower === 'admin master' || roleLower === 'admin';
+        return isAdm;
       case 'REPORTS':
-        return (
-          roleLower === 'admin master' ||
-          roleLower === 'admin' ||
-          roleLower === 'all sites' ||
-          roleLower === 'all'
-        );
+        return isAdm || isAll;
       case 'MOVE':
       case 'TRANSFER':
       case 'OPNAME':
