@@ -67,6 +67,14 @@ const MainAppInner: React.FC = () => {
     }
   }, [isLoadingSession, currentUser?.username]);
 
+  // Reset ke Beranda saat logout, agar login berikutnya (di tab/sesi yang sama) tidak
+  // "nyangkut" di tab terakhir sebelum logout (mis. Admin GAS).
+  useEffect(() => {
+    if (!isLoadingSession && !currentUser) {
+      setActiveTab('home');
+    }
+  }, [isLoadingSession, currentUser]);
+
   // Modals state
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState<boolean>(false);
   const [isLogoutOpen, setIsLogoutOpen] = useState<boolean>(false);

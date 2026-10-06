@@ -35,8 +35,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       return;
     }
 
-    if (newPassword.length < 6) {
-      setStatusNotice({ type: 'error', text: 'Password baru minimal harus 6 karakter.' });
+    if (newPassword.length < 10) {
+      setStatusNotice({ type: 'error', text: 'Password baru minimal harus 10 karakter.' });
       return;
     }
 
@@ -142,7 +142,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               value={newPassword}
               disabled={isSubmitting}
               onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Minimal 6 karakter"
+              placeholder="Minimal 10 karakter"
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
               required
             />

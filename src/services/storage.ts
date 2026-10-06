@@ -1,15 +1,31 @@
 /**
- * Storage service simulating Google Sheets + Apps Script backend with LockService & Atomic Transactions
+ * Lapisan data (Supabase). Nama dan bentuk metode publik SAMA dengan versi lama agar view
+ * tidak perlu diubah, tetapi cara kerjanya berbeda secara mendasar:
+ *
+ *   - Server (Postgres) adalah satu-satunya sumber kebenaran. Cache di memori hanya
+ *     cermin baca; TIDAK ada localStorage untuk data mesin (tidak ada lagi konflik
+ *     "data lokal menang atas sheet" dan tidak ada kebocoran antar pengguna).
+ *   - Semua tulis (pindah, undo, transfer, opname) memanggil fungsi server (RPC), lalu
+ *     cache diperbarui dari server. Aturan bisnis ditegakkan di database, bukan di sini.
+ *   - Fitur yang dulu hanya palsu/lokal (laporan email, tambah site, audit lokal, impor
+ *     Excel) mengembalikan pesan jujur "belum tersedia" dan tidak berpura-pura berhasil.
  */
 
+import { supabase } from './supabase';
+import { emitForbidden, emitUnauthorized } from './authService';
 import {
-  Machine,
   Site,
+  SiteType,
   Location,
+  LocationType,
   Rack,
+  Machine,
+  MachineStatus,
   Movement,
-  Transfer,
+  MovementType,
   StatusLog,
+  Transfer,
+  TransferStatus,
   OpnameSession,
   OpnameItem,
   User,
@@ -17,270 +33,513 @@ import {
   DailyReport,
   AuditLog,
   AppSettings,
-  MachineStatus,
-  SiteId,
 } from '../types';
-import { postGasApi } from './gasAuthService';
-import {
-  INITIAL_SITES,
-  INITIAL_RACKS,
-  INITIAL_SETTINGS,
-  INITIAL_USERS,
-  INITIAL_RECIPIENTS,
-  generateLocations,
-  generateMachineDataset,
-} from './seedData';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>;
+
+const UI_SETTINGS_KEY = 'ptwinners_ui_settings_v2';
+const POLL_INTERVAL_MS = 90_000;
+// Batas pengaman murni untuk mencegah loop tak berhenti bila API berperilaku aneh.
+// HARUS selalu jauh lebih besar dari jumlah mesin sesungguhnya (saat ini 5.247),
+// jika tidak, data akan terpotong diam-diam tanpa pesan error.
+const MAX_ROWS = 50_000;
+const NOT_AVAILABLE = 'Fitur ini belum tersedia di versi Supabase. Kelola lewat dashboard Supabase atau tunggu pembaruan berikutnya.';
+
+const DEFAULT_SETTINGS: AppSettings = {
+  dailyReportTime: '16:30',
+  transferOverdueDays: 3,
+  undoTimeLimitMinutes: 60,
+  sessionExpiryHours: 8,
+  rackSlotCapacity: 1,
+  companyName: 'PT.WINNERS',
+  themePreset: 'sky_cyan',
+  layoutStyle: 'sidebar',
+  accentColor: 'emerald',
+  cardRadius: 'rounded-2xl',
+};
+
+const MACHINE_COLS =
+  'id, asset_code, barcode, item, standard_machine_name, serial, manufacturer, model, home_site_id, acq_date, ' +
+  'status, status_since, site_id, location_id, loan_to, loan_due_date, data_flag, notes, ' +
+  'last_moved_at, last_opname_at, updated_at, machine_types(local_name)';
+
+// ---------- pembantu ----------
+function uuid(): string {
+  const c = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  const b = new Uint8Array(16);
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function isoWeek(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function errMessage(e: unknown): string {
+  const err = (e ?? {}) as { message?: string };
+  const msg = String(err.message ?? '');
+  if (/failed to fetch|networkerror|network request failed|load failed/i.test(msg)) {
+    return 'Tidak dapat terhubung ke server. Coba lagi.';
+  }
+  return msg || 'Terjadi kesalahan saat menghubungi server.';
+}
+
+function isAuthError(e: unknown): boolean {
+  const err = (e ?? {}) as { code?: string; status?: number; message?: string };
+  return err.code === 'PGRST301' || err.code === 'PGRST303' || err.status === 401 || /jwt/i.test(String(err.message ?? ''));
+}
+
+function mapMovementType(t: string): MovementType {
+  switch (t) {
+    case 'MOVE':
+    case 'STATUS_CHANGE':
+      return 'MOVE';
+    case 'TRANSFER_OUT':
+      return 'TRANSFER_OUT';
+    case 'TRANSFER_IN':
+      return 'TRANSFER_IN';
+    case 'TRANSFER_CANCEL':
+    case 'UNDO':
+      return 'UNDO';
+    case 'OPNAME_FIX':
+      return 'OPNAME_FIX';
+    default:
+      return 'ADMIN_FIX';
+  }
+}
+
+interface RpcResult {
+  success: boolean;
+  message: string;
+  code?: string;
+  data: Row;
+}
+
+interface TransferMeta {
+  orderId: number;
+  assetCode: string;
+}
+
+/**
+ * Bentuk sesi opname SAMA PERSIS dengan ServerOpnameSession di OpnameView.tsx, supaya
+ * OpnameView tidak perlu diubah tipenya, hanya sumber panggilannya (postGasApi -> storageService).
+ */
+export interface ServerOpnameSession {
+  sessionId: string;
+  siteId: string;
+  locationId?: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  allowedSites: string[];
+  lockMoves?: boolean;
+  startedBy: string;
+  startedAt: string;
+  endedAt?: string;
+  expected?: number;
+  scanned?: number;
+  match?: number;
+  missing?: number;
+  misplaced?: number;
+  week?: string;
+}
 
 class StorageService {
-  private machines: Machine[] = [];
   private sites: Site[] = [];
   private locations: Location[] = [];
   private racks: Rack[] = [];
-  private movements: Movement[] = [];
+  private machines: Machine[] = [];
   private transfers: Transfer[] = [];
-  private statusLogs: StatusLog[] = [];
+  private movements: Movement[] = [];
+  private movementRows: Row[] = [];
   private opnameSessions: OpnameSession[] = [];
-  private opnameItems: OpnameItem[] = [];
-  private users: User[] = [];
-  private reportRecipients: ReportRecipient[] = [];
-  private dailyReports: DailyReport[] = [];
-  private auditLogs: AuditLog[] = [];
-  private settings: AppSettings = INITIAL_SETTINGS;
-
-  // Fast hash maps for O(1) searches across 5,700+ records
-  private barcodeMap = new Map<string, Machine>();
+  private transferMeta = new Map<string, TransferMeta>();
   private assetCodeMap = new Map<string, Machine>();
-  private listeners: Array<() => void> = [];
-  private syncStatusListeners: Array<(isSyncing: boolean) => void> = [];
-  private isAutoSyncing = false;
-  private lastAutoSyncTime: number = 0;
+  private barcodeMap = new Map<string, Machine>();
+  private settings: AppSettings = { ...DEFAULT_SETTINGS };
 
-  private isInitialized = false;
+  private listeners = new Set<() => void>();
+  private syncListeners = new Set<(isSyncing: boolean) => void>();
+  private syncing = false;
+  private syncPromise: Promise<{ success: boolean; message: string; count: number; source: string; details?: unknown }> | null = null;
+  private lastSyncAt = 0;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    this.init();
-    // Timer otomatis di konstruktor telah dihapus agar sync dipicu setelah login / restore sesi
+    this.settings = this.loadUiSettings();
   }
 
+  // ---------------------------------------------------------------- langganan
   public subscribe(fn: () => void): () => void {
-    this.listeners.push(fn);
+    this.listeners.add(fn);
     return () => {
-      this.listeners = this.listeners.filter((l) => l !== fn);
+      this.listeners.delete(fn);
     };
   }
 
   public subscribeSyncStatus(fn: (isSyncing: boolean) => void): () => void {
-    this.syncStatusListeners.push(fn);
-    fn(this.isAutoSyncing);
+    this.syncListeners.add(fn);
+    fn(this.syncing);
     return () => {
-      this.syncStatusListeners = this.syncStatusListeners.filter((l) => l !== fn);
+      this.syncListeners.delete(fn);
     };
   }
 
-  private notifySyncStatus(isSyncing: boolean) {
-    for (const listener of this.syncStatusListeners) {
-      try {
-        listener(isSyncing);
-      } catch (e) {
-        console.error('Error notifying sync status listener:', e);
-      }
-    }
-  }
-
   public getIsSyncing(): boolean {
-    return this.isAutoSyncing;
+    return this.syncing;
   }
 
-  private notifyListeners() {
-    for (const listener of this.listeners) {
+  private notify(): void {
+    this.listeners.forEach((fn) => {
       try {
-        listener();
-      } catch (e) {
-        console.error('Error notifying storage listener:', e);
+        fn();
+      } catch {
+        /* abaikan kesalahan pendengar */
       }
-    }
+    });
   }
 
-  /**
-   * Auto background sync: berjalan otomatis saat dipanggil setelah login / sesi pulih
-   * @param force Jika true, lewati batas jeda throttle 15 detik
-   */
+  private setSyncing(v: boolean): void {
+    this.syncing = v;
+    this.syncListeners.forEach((fn) => {
+      try {
+        fn(v);
+      } catch {
+        /* abaikan */
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- sinkronisasi
+  /** Dipanggil App setelah login. force=false melewati sinkronisasi bila baru saja dilakukan. */
   public async triggerAutoBackgroundSync(force: boolean = false): Promise<boolean> {
-    if (this.isAutoSyncing) return false;
-    const now = Date.now();
-    // Cegah spam sync (minimal jeda 15 detik), kecuali dipaksa (force = true)
-    if (!force && now - this.lastAutoSyncTime < 15000) return false;
+    if (!force && Date.now() - this.lastSyncAt < 60_000) return true;
+    const res = await this.syncFromServer();
+    return res.success;
+  }
 
-    this.isAutoSyncing = true;
-    this.notifySyncStatus(true);
+  /** Nama lama dipertahankan agar pemanggil tidak perlu diubah. Parameter diabaikan. */
+  public async syncFromGoogleSheet(
+    _spreadsheetIdParam?: string,
+    _sheetName?: string
+  ): Promise<{ success: boolean; message: string; count: number; source: string; details?: unknown }> {
+    return this.syncFromServer();
+  }
+
+  public syncFromServer(): Promise<{ success: boolean; message: string; count: number; source: string; details?: unknown }> {
+    if (this.syncPromise) return this.syncPromise;
+    this.syncPromise = this.doSync().finally(() => {
+      this.syncPromise = null;
+    });
+    return this.syncPromise;
+  }
+
+  private async fetchAll(
+    build: (from: number, to: number) => PromiseLike<{ data: Row[] | null; error: { message: string; code?: string } | null }>,
+    pageSize = 1000
+  ): Promise<Row[]> {
+    const out: Row[] = [];
+    for (let from = 0; from < MAX_ROWS; from += pageSize) {
+      const { data, error } = await build(from, from + pageSize - 1);
+      if (error) throw error;
+      const rows = data ?? [];
+      out.push(...rows);
+      if (rows.length < pageSize) break;
+    }
+    return out;
+  }
+
+  private async doSync(): Promise<{ success: boolean; message: string; count: number; source: string; details?: unknown }> {
+    this.setSyncing(true);
     try {
-      const res = await this.syncFromGoogleSheet(this.settings.spreadsheetId, 'machine_asset');
-      if (res.success) {
-        this.lastAutoSyncTime = Date.now();
-        this.notifyListeners();
+      const [siteRows, rackRows, locRows, machineRows, settingRows] = await Promise.all([
+        this.fetchAll((a, b) => supabase.from('sites').select('site_id, name, type, active').order('site_id').range(a, b)),
+        this.fetchAll((a, b) => supabase.from('racks').select('rack_no, column_count, active').order('rack_no').range(a, b)),
+        this.fetchAll((a, b) =>
+          supabase
+            .from('locations')
+            .select('location_id, site_id, type, display_name, rack_no, column_no, stack, slot_no, active, sort_order')
+            .order('sort_order')
+            .order('location_id')
+            .range(a, b)
+        ),
+        this.fetchAll((a, b) => supabase.from('machines').select(MACHINE_COLS).order('id').range(a, b)),
+        this.fetchAll((a, b) => supabase.from('app_settings').select('key, value').range(a, b)),
+      ]);
+
+      this.sites = siteRows.map((r) => ({
+        siteId: String(r.site_id),
+        name: String(r.name),
+        type: r.type as SiteType,
+        active: Boolean(r.active),
+      }));
+      this.racks = rackRows.map((r) => ({
+        siteId: 'WH2',
+        rackNo: Number(r.rack_no),
+        columnCount: Number(r.column_count),
+        active: Boolean(r.active),
+      }));
+      this.locations = locRows.map((r) => ({
+        locationId: String(r.location_id),
+        siteId: String(r.site_id),
+        type: r.type as LocationType,
+        displayName: String(r.display_name),
+        rackNo: r.rack_no ?? undefined,
+        columnNo: r.column_no ?? undefined,
+        stack: r.stack ?? undefined,
+        capacity: r.type === 'RACK_SLOT' ? 1 : undefined,
+        active: Boolean(r.active),
+        sortOrder: Number(r.sort_order ?? 0),
+      }));
+      this.machines = machineRows.map((r) => this.mapMachine(r));
+
+      for (const s of settingRows) {
+        if (s.key === 'undo_time_limit_minutes') this.settings.undoTimeLimitMinutes = Number(s.value) || 60;
+        if (s.key === 'transfer_overdue_days') this.settings.transferOverdueDays = Number(s.value) || 3;
       }
-      return Boolean(res.success);
-    } catch (err) {
-      console.warn('Background auto-sync check completed with offline fallback.', err);
-      return false;
-    } finally {
-      this.isAutoSyncing = false;
-      this.notifySyncStatus(false);
-    }
-  }
 
-  /**
-   * Membersihkan seluruh cache data mesin lokal saat pengguna logout
-   * agar tidak terjadi sisa data lokal antar pengguna yang berbeda di perangkat yang sama
-   */
-  public clearLocalMachineCache() {
-    this.machines = [];
-    this.movements = [];
-    this.transfers = [];
-    this.statusLogs = [];
-    this.opnameSessions = [];
-    this.opnameItems = [];
-    this.rebuildIndices();
-    this.save();
-    this.notifyListeners();
-  }
-
-  public init() {
-    if (this.isInitialized) return;
-
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem('ptwinners_tracker_settings');
-        localStorage.removeItem('ptwinners_gas_url');
-        localStorage.removeItem('gas_url');
-      } catch {}
-    }
-
-    // Check LocalStorage or seed fresh
-    const savedData = typeof window !== 'undefined' ? localStorage.getItem('ptwinners_tracker_db_v1') : null;
-
-    if (savedData) {
-      try {
-        const parsed = JSON.parse(savedData);
-        if (parsed.settings && parsed.settings.gasWebAppUrl) {
-          delete parsed.settings.gasWebAppUrl;
-        }
-        this.sites = parsed.sites || INITIAL_SITES;
-        this.racks = parsed.racks || INITIAL_RACKS;
-        this.locations = parsed.locations || generateLocations();
-        this.machines = parsed.machines || [];
-        this.movements = parsed.movements || [];
-        this.transfers = parsed.transfers || [];
-        this.statusLogs = parsed.statusLogs || [];
-        this.opnameSessions = parsed.opnameSessions || [];
-        this.opnameItems = parsed.opnameItems || [];
-        this.users = parsed.users || INITIAL_USERS;
-        this.reportRecipients = parsed.reportRecipients || INITIAL_RECIPIENTS;
-        this.dailyReports = parsed.dailyReports || [];
-        this.auditLogs = parsed.auditLogs || [];
-        this.settings = { ...INITIAL_SETTINGS, ...(parsed.settings || {}) };
-        if (!this.settings.spreadsheetId) {
-          this.settings.spreadsheetId = INITIAL_SETTINGS.spreadsheetId;
-        }
-
-        if (this.machines.length === 0) {
-          // Inisialisasi bersih (tanpa data dummy)
-          this.machines = [];
-          this.movements = [];
-        }
-      } catch (e) {
-        console.error('Error loading stored DB, initializing clean...', e);
-        this.seedFresh();
-      }
-    } else {
-      this.seedFresh();
-    }
-
-    this.rebuildIndices();
-    this.isInitialized = true;
-  }
-
-  private seedFresh() {
-    this.sites = [...INITIAL_SITES];
-    this.racks = [...INITIAL_RACKS];
-    this.locations = generateLocations();
-    this.users = [...INITIAL_USERS];
-    this.reportRecipients = [...INITIAL_RECIPIENTS];
-    this.settings = { ...INITIAL_SETTINGS };
-
-    // Inisialisasi bersih tanpa dummy mesin
-    this.machines = [];
-    this.movements = [];
-    this.statusLogs = [];
-    this.transfers = [];
-    this.opnameSessions = [];
-    this.opnameItems = [];
-
-    this.save();
-  }
-
-  /**
-   * Menghapus seluruh data dummy / mesin dan mengosongkan database
-   */
-  public clearAllData(keepSettings: boolean = true) {
-    this.machines = [];
-    this.movements = [];
-    this.transfers = [];
-    this.statusLogs = [];
-    this.opnameSessions = [];
-    this.opnameItems = [];
-    
-    if (!keepSettings) {
-      this.sites = [...INITIAL_SITES];
-      this.racks = [...INITIAL_RACKS];
-      this.locations = generateLocations();
-      this.users = [...INITIAL_USERS];
-      this.settings = { ...INITIAL_SETTINGS };
-    }
-
-    this.rebuildIndices();
-    this.save();
-    this.notifyListeners();
-    this.logAudit('System', 'CLEAR_DATABASE', 'Seluruh data dummy dan mesin telah dihapus dan dikosongkan.');
-  }
-
-  public rebuildIndices() {
-    this.barcodeMap.clear();
-    this.assetCodeMap.clear();
-    for (const m of this.machines) {
-      if (m.barcode) this.barcodeMap.set(m.barcode.trim(), m);
-      if (m.assetCode) this.assetCodeMap.set(m.assetCode.trim().toUpperCase(), m);
-    }
-  }
-
-  private save() {
-    if (typeof window === 'undefined') return;
-    try {
-      // Don't save full 5700 machines in localstorage if exceeds limit, save to indexed state
-      const lightweight = {
-        sites: this.sites,
-        racks: this.racks,
-        locations: this.locations,
-        users: this.users,
-        settings: this.settings,
-        reportRecipients: this.reportRecipients,
-        transfers: this.transfers,
-        opnameSessions: this.opnameSessions,
-        dailyReports: this.dailyReports,
-        // store sample first 300 machines or full if size allows
-        machines: this.machines.slice(0, 1000),
-        movements: this.movements.slice(-200),
-        statusLogs: this.statusLogs.slice(-200),
-        auditLogs: this.auditLogs.slice(-200),
+      await Promise.all([this.loadTransfers(), this.loadMovements(), this.loadOpnameSessions()]);
+      this.applyTransitInfo();
+      this.rebuildIndices();
+      this.lastSyncAt = Date.now();
+      this.startPolling();
+      this.notify();
+      return {
+        success: true,
+        message: `${this.machines.length} mesin dimuat dari server.`,
+        count: this.machines.length,
+        source: 'Supabase',
       };
-      localStorage.setItem('ptwinners_tracker_db_v1', JSON.stringify(lightweight));
-    } catch {
-      // Storage quota exceeded or disabled
+    } catch (e) {
+      if (isAuthError(e)) emitUnauthorized();
+      return { success: false, message: errMessage(e), count: this.machines.length, source: 'Supabase' };
+    } finally {
+      this.setSyncing(false);
     }
   }
 
-  // --- QUERY APIS ---
+  private startPolling(): void {
+    if (this.pollTimer || typeof window === 'undefined') return;
+    this.pollTimer = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        void this.triggerAutoBackgroundSync(true);
+      }
+    }, POLL_INTERVAL_MS);
+  }
 
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  /** Dipanggil saat logout / sesi berakhir: kosongkan semua cache data. */
+  public clearLocalMachineCache(): void {
+    this.stopPolling();
+    this.sites = [];
+    this.locations = [];
+    this.racks = [];
+    this.machines = [];
+    this.transfers = [];
+    this.movements = [];
+    this.movementRows = [];
+    this.opnameSessions = [];
+    this.transferMeta.clear();
+    this.lastSyncAt = 0;
+    this.rebuildIndices();
+    this.notify();
+  }
+
+  public rebuildIndices(): void {
+    this.assetCodeMap = new Map(this.machines.map((m) => [m.assetCode.toUpperCase(), m]));
+    this.barcodeMap = new Map(this.machines.map((m) => [m.barcode, m]));
+  }
+
+  // ---------------------------------------------------------------- pemuat data
+  private mapMachine(r: Row): Machine {
+    const mt = r.machine_types as Row | null | undefined;
+    const status = String(r.status) as MachineStatus;
+    return {
+      assetCode: String(r.asset_code),
+      barcode: String(r.barcode),
+      item: String(r.item ?? ''),
+      homeFactory: String(r.home_site_id ?? r.site_id ?? ''),
+      acqDate: String(r.acq_date ?? ''),
+      standardMachineName: String(r.standard_machine_name ?? ''),
+      localName: mt && mt.local_name ? String(mt.local_name) : undefined,
+      serial: String(r.serial ?? ''),
+      manufacturer: String(r.manufacturer ?? ''),
+      model: String(r.model ?? ''),
+      status,
+      locationId: r.location_id ? String(r.location_id) : status === 'SOLD' ? 'SOLD' : '',
+      siteId: String(r.site_id),
+      lastMovedAt: r.last_moved_at ?? undefined,
+      lastOpnameAt: r.last_opname_at ?? undefined,
+      statusSince: r.status_since ?? undefined,
+      loanTo: r.loan_to ?? undefined,
+      loanDueDate: r.loan_due_date ?? undefined,
+      dataFlag: r.data_flag ?? undefined,
+      updatedAt: String(r.updated_at ?? ''),
+      updatedBy: '',
+      notes: r.notes ?? undefined,
+    };
+  }
+
+  private async loadTransfers(): Promise<void> {
+    const rows = await this.fetchAll((a, b) =>
+      supabase
+        .from('transfer_items')
+        .select(
+          'id, transfer_id, status, to_location_id, received_at, received_by_nik, cancelled_at, cancelled_by_nik, asset_code, ' +
+            'transfers(transfer_no, from_site_id, to_site_id, note, created_at, created_by_nik)'
+        )
+        .order('id', { ascending: false })
+        .range(a, b)
+    );
+    this.transferMeta.clear();
+    const list: Transfer[] = [];
+    for (const r of rows) {
+      const t = (r.transfers ?? {}) as Row;
+      const id = String(r.id);
+      const assetCode = String(r.asset_code ?? '');
+      this.transferMeta.set(id, { orderId: Number(r.transfer_id), assetCode });
+      list.push({
+        transferId: id,
+        batchId: t.transfer_no ? String(t.transfer_no) : undefined,
+        assetCode,
+        fromSite: String(t.from_site_id ?? ''),
+        toSite: String(t.to_site_id ?? ''),
+        status: String(r.status) as TransferStatus,
+        sentAt: String(t.created_at ?? ''),
+        sentBy: String(t.created_by_nik ?? ''),
+        receivedAt: r.received_at ?? r.cancelled_at ?? undefined,
+        receivedBy: r.received_by_nik ?? r.cancelled_by_nik ?? undefined,
+        toLocation: r.to_location_id ?? undefined,
+        note: t.note ?? undefined,
+      });
+    }
+    this.transfers = list;
+  }
+
+  private async loadMovements(): Promise<void> {
+    const { data, error } = await supabase
+      .from('movements')
+      .select(
+        'id, movement_type, from_location, to_location, from_site_id, to_site_id, status_before, status_after, ' +
+          'reason, moved_by_nik, moved_at, asset_code, transfer_id, opname_session_id'
+      )
+      .order('id', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    this.movementRows = (data ?? []) as Row[];
+    this.movements = this.movementRows.map((r) => ({
+      movementId: String(r.id),
+      timestamp: String(r.moved_at),
+      assetCode: String(r.asset_code ?? ''),
+      type: mapMovementType(String(r.movement_type)),
+      fromLocation: String(r.from_location ?? ''),
+      toLocation: String(r.to_location ?? ''),
+      fromSite: String(r.from_site_id ?? ''),
+      toSite: String(r.to_site_id ?? ''),
+      transferId: r.transfer_id != null ? String(r.transfer_id) : undefined,
+      opnameSessionId: r.opname_session_id != null ? String(r.opname_session_id) : undefined,
+      reason: r.reason ?? undefined,
+      byUser: String(r.moved_by_nik ?? ''),
+    }));
+  }
+
+  private async loadOpnameSessions(): Promise<void> {
+    const { data, error } = await supabase
+      .from('opname_sessions')
+      .select(
+        'session_no, site_id, location_id, status, started_by_nik, started_at, ended_at, ' +
+          'expected_count, scanned_count, match_count, missing_count, misplaced_count'
+      )
+      .order('id', { ascending: false })
+      .limit(200);
+    if (error) throw error;
+    this.opnameSessions = ((data ?? []) as Row[]).map((r) => ({
+      sessionId: String(r.session_no),
+      week: isoWeek(String(r.started_at)),
+      locationId: String(r.location_id ?? ''),
+      siteId: String(r.site_id),
+      startedAt: String(r.started_at),
+      startedBy: String(r.started_by_nik ?? ''),
+      finishedAt: r.ended_at ?? undefined,
+      expected: Number(r.expected_count ?? 0),
+      scanned: Number(r.scanned_count ?? 0),
+      match: Number(r.match_count ?? 0),
+      missing: Number(r.missing_count ?? 0),
+      misplaced: Number(r.misplaced_count ?? 0),
+      status: r.status === 'ACTIVE' ? 'IN_PROGRESS' : (r.status as 'COMPLETED' | 'CANCELLED'),
+    }));
+  }
+
+  /** Mesin yang sedang IN_TRANSIT: tampilkan lokasi "<tujuan>-IN_TRANSIT" dan id transfernya. */
+  private applyTransitInfo(): void {
+    const open = new Map<string, Transfer>();
+    for (const t of this.transfers) {
+      if (t.status === 'IN_TRANSIT') open.set(t.assetCode.toUpperCase(), t);
+    }
+    for (const m of this.machines) {
+      if (m.status === 'IN_TRANSIT') {
+        const t = open.get(m.assetCode.toUpperCase());
+        m.pendingTransferId = t ? t.transferId : undefined;
+        m.locationId = t ? `${t.toSite}-IN_TRANSIT` : 'IN_TRANSIT';
+      } else {
+        m.pendingTransferId = undefined;
+      }
+    }
+  }
+
+  private async refreshMachinesByCode(codes: string[]): Promise<void> {
+    const unique = Array.from(new Set(codes.map((c) => c.trim().toUpperCase()).filter(Boolean)));
+    if (unique.length === 0) return;
+    const { data, error } = await supabase.from('machines').select(MACHINE_COLS).in('asset_code', unique);
+    if (error) throw error;
+    const fresh = new Map<string, Machine>();
+    for (const r of (data ?? []) as Row[]) {
+      const m = this.mapMachine(r);
+      fresh.set(m.assetCode.toUpperCase(), m);
+    }
+    const next: Machine[] = [];
+    for (const m of this.machines) {
+      const code = m.assetCode.toUpperCase();
+      if (!unique.includes(code)) next.push(m);
+      else if (fresh.has(code)) next.push(fresh.get(code) as Machine);
+      // tidak ada di hasil = tidak lagi terlihat (mis. sudah pindah ke site di luar akses) -> dibuang
+    }
+    for (const [code, m] of fresh) {
+      if (!next.some((x) => x.assetCode.toUpperCase() === code)) next.push(m);
+    }
+    this.machines = next;
+  }
+
+  /** Setelah tulis berhasil: perbarui mesin terkait + transfer + riwayat dari server. */
+  private async afterMutation(codes: string[]): Promise<void> {
+    try {
+      await Promise.all([this.refreshMachinesByCode(codes), this.loadTransfers(), this.loadMovements()]);
+      this.applyTransitInfo();
+      this.rebuildIndices();
+    } catch (e) {
+      if (isAuthError(e)) emitUnauthorized();
+    }
+    this.notify();
+  }
+
+  // ---------------------------------------------------------------- pembaca
   public getSites(): Site[] {
     return this.sites;
   }
@@ -304,35 +563,44 @@ class StorageService {
 
   public getMachineByCode(query: string): { machine: Machine | null; searchTimeMs: number } {
     const t0 = performance.now();
-    const clean = query.trim();
-    const cleanUpper = clean.toUpperCase();
-
-    // 1. Direct O(1) lookup by Barcode
-    let m = this.barcodeMap.get(clean);
-    // 2. Direct O(1) lookup by Asset Code
-    if (!m) m = this.assetCodeMap.get(cleanUpper);
-
-    // 3. Fallback: Serial Number exact match
-    if (!m) {
-      m = this.machines.find((x) => x.serial === clean || x.serial.toUpperCase() === cleanUpper);
+    const clean = (query || '').trim();
+    const upper = clean.toUpperCase();
+    let m = this.barcodeMap.get(clean) || this.assetCodeMap.get(upper);
+    if (!m && clean) {
+      m = this.machines.find((x) => x.serial === clean || x.serial.toUpperCase() === upper);
     }
-
-    const t1 = performance.now();
-    return { machine: m || null, searchTimeMs: Number((t1 - t0).toFixed(2)) };
+    return { machine: m || null, searchTimeMs: Number((performance.now() - t0).toFixed(2)) };
   }
 
   public getMachinesAtLocation(locationId: string): Machine[] {
     return this.machines.filter((m) => m.locationId === locationId);
   }
 
+  /** 300 riwayat terbaru yang terlihat oleh pengguna. Riwayat lengkap: gasAuthService.getMovements (server). */
   public getMovements(assetCode?: string): Movement[] {
     if (!assetCode) return this.movements;
     return this.movements.filter((mov) => mov.assetCode === assetCode);
   }
 
+  /** Perubahan status diturunkan dari riwayat terbaru (bukan arsip lengkap). */
   public getStatusLogs(assetCode?: string): StatusLog[] {
-    if (!assetCode) return this.statusLogs;
-    return this.statusLogs.filter((log) => log.assetCode === assetCode);
+    const logs: StatusLog[] = [];
+    for (const r of this.movementRows) {
+      const type = String(r.movement_type);
+      if (type.startsWith('TRANSFER')) continue;
+      if (!r.status_before || !r.status_after || r.status_before === r.status_after) continue;
+      if (assetCode && r.asset_code !== assetCode) continue;
+      logs.push({
+        logId: String(r.id),
+        timestamp: String(r.moved_at),
+        assetCode: String(r.asset_code ?? ''),
+        oldStatus: r.status_before as MachineStatus,
+        newStatus: r.status_after as MachineStatus,
+        byUser: String(r.moved_by_nik ?? ''),
+        note: r.reason ?? undefined,
+      });
+    }
+    return logs;
   }
 
   public getTransfers(siteId?: string): Transfer[] {
@@ -349,36 +617,77 @@ class StorageService {
     return this.opnameSessions.filter((s) => s.siteId === siteId);
   }
 
-  public getOpnameItems(sessionId: string): OpnameItem[] {
-    return this.opnameItems.filter((i) => i.sessionId === sessionId);
+  public getOpnameItems(_sessionId: string): OpnameItem[] {
+    return [];
   }
 
   public getUsers(): User[] {
-    return this.users;
+    return [];
   }
 
   public getReportRecipients(): ReportRecipient[] {
-    return this.reportRecipients;
+    return [];
   }
 
   public getDailyReports(): DailyReport[] {
-    return this.dailyReports;
+    return [];
   }
 
   public getAuditLogs(): AuditLog[] {
-    return this.auditLogs;
+    return [];
   }
 
   public getSettings(): AppSettings {
     return this.settings;
   }
 
-  // --- MUTATION / TRANSACTION APIS (Enforcing A5 Rules) ---
+  // ---------------------------------------------------------------- pengaturan tampilan (lokal)
+  private loadUiSettings(): AppSettings {
+    try {
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(UI_SETTINGS_KEY) : null;
+      if (raw) return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<AppSettings>) };
+    } catch {
+      /* pakai bawaan */
+    }
+    return { ...DEFAULT_SETTINGS };
+  }
 
-  /**
-   * Move Machine within the same site (Fase 3 & A5.1)
-   * Menunggu respons server (MOVE_MACHINE), hanya terapkan di lokal jika server sukses.
-   */
+  public updateSettings(newSettings: AppSettings): { success: boolean; message: string } {
+    this.settings = { ...this.settings, ...newSettings };
+    try {
+      // Hanya preferensi tampilan; angka aturan bisnis berasal dari server (app_settings).
+      const ui = {
+        themePreset: this.settings.themePreset,
+        layoutStyle: this.settings.layoutStyle,
+        accentColor: this.settings.accentColor,
+        cardRadius: this.settings.cardRadius,
+      };
+      window.localStorage.setItem(UI_SETTINGS_KEY, JSON.stringify(ui));
+    } catch {
+      /* abaikan */
+    }
+    this.notify();
+    return { success: true, message: 'Pengaturan tampilan disimpan.' };
+  }
+
+  // ---------------------------------------------------------------- tulis (semua lewat fungsi server)
+  private async rpc(fn: string, args: Row): Promise<RpcResult> {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error) {
+      if (isAuthError(error)) {
+        emitUnauthorized();
+        return { success: false, message: 'Sesi berakhir, silakan login kembali', code: 'UNAUTHORIZED', data: {} };
+      }
+      return { success: false, message: errMessage(error), data: {} };
+    }
+    const r = (data ?? {}) as Row;
+    if (r.success === false) {
+      if (r.code === 'FORBIDDEN' || r.code === 'LOCKED') emitForbidden(String(r.message ?? ''));
+      return { success: false, message: String(r.message ?? 'Operasi gagal.'), code: r.code, data: r };
+    }
+    return { success: true, message: String(r.message ?? ''), data: r };
+  }
+
   public async moveMachine(params: {
     assetCode: string;
     targetLocationId: string;
@@ -389,290 +698,50 @@ class StorageService {
     loanTo?: string;
     loanDueDate?: string;
   }): Promise<{ success: boolean; message: string; machine?: Machine; movement?: Movement }> {
-    const { assetCode, targetLocationId, username, userSiteAccess, reason, newStatus, loanTo, loanDueDate } = params;
-
-    const machine = this.assetCodeMap.get(assetCode.toUpperCase());
-    if (!machine) {
-      return { success: false, message: `Mesin dengan kode ${assetCode} tidak ditemukan.` };
-    }
-
-    // Site permission check
-    if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(machine.siteId)) {
-      return { success: false, message: `Akses ditolak: Anda tidak memiliki izin untuk mengelola site ${machine.siteId}.` };
-    }
-
-    // Check In Transit
-    if (machine.pendingTransferId) {
-      return { success: false, message: 'Mesin sedang In Transit (Transfer) dan terkunci. Harus diterima atau dibatalkan lebih dulu.' };
-    }
-
-    // Check SOLD
-    if (machine.status === 'SOLD') {
-      return { success: false, message: 'Mesin berstatus SOLD tidak dapat dipindahkan.' };
-    }
-
-    // Target Location validation
-    let finalTargetLocationId = targetLocationId ? targetLocationId.trim() : '';
-
-    if (newStatus === 'SOLD') {
-      finalTargetLocationId = finalTargetLocationId || 'SOLD';
-    } else {
-      if (!finalTargetLocationId) {
-        return { success: false, message: 'Lokasi tujuan wajib dipilih.' };
-      }
-
-      const targetLoc = this.locations.find((l) => l.locationId === finalTargetLocationId);
-      if (!targetLoc) {
-        return { success: false, message: `Lokasi tujuan ${finalTargetLocationId} tidak ditemukan.` };
-      }
-
-      if (!targetLoc.active) {
-        return { success: false, message: `Lokasi tujuan ${finalTargetLocationId} sedang dinonaktifkan.` };
-      }
-
-      if (targetLoc.siteId !== machine.siteId) {
-        return { success: false, message: `Pindah lokasi biasa hanya untuk site yang sama (${machine.siteId}). Untuk antar site, gunakan fitur Transfer Antar Site.` };
-      }
-
-      // WH2 Rack Slot Capacity Check (Max 3 machines)
-      if (targetLoc.type === 'RACK_SLOT') {
-        const currentSlotMachines = this.getMachinesAtLocation(finalTargetLocationId).filter((m) => m.assetCode !== machine.assetCode);
-        const limit = targetLoc.capacity || this.settings.rackSlotCapacity || 3;
-        if (currentSlotMachines.length >= limit) {
-          return {
-            success: false,
-            message: `Slot ${targetLoc.displayName} sudah PENUH (kapasitas ${limit} mesin tercapai). Silakan pilih slot lain.`,
-          };
-        }
-      }
-    }
-
-    // Kirim ke backend server Google Apps Script dan TUNGGU respons
-    try {
-      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('MOVE_MACHINE', {
-        assetCode: machine.assetCode,
-        barcode: machine.barcode,
-        locationId: finalTargetLocationId,
-        siteId: machine.siteId,
-        status: newStatus || machine.status,
-        reason: reason || (newStatus === 'SOLD' ? 'Status diubah menjadi SOLD (Terjual/Afkir)' : 'Pemindahan normal'),
-      });
-
-      if (!serverRes || !serverRes.success) {
-        return {
-          success: false,
-          message: serverRes?.message || 'Gagal memindahkan mesin di server.',
-        };
-      }
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server untuk memindahkan mesin.',
-      };
-    }
-
-    // Hanya jika respons server success: true, terapkan perubahan di lokal
-    const fromLoc = machine.locationId;
-    const now = new Date().toISOString();
-
-    machine.locationId = finalTargetLocationId;
-    machine.lastMovedAt = now;
-    machine.lastMovedBy = username;
-    machine.updatedAt = now;
-    machine.updatedBy = username;
-
-    if (newStatus && newStatus !== machine.status) {
-      const oldStatus = machine.status;
-      machine.status = newStatus;
-      machine.statusSince = now;
-      if (newStatus === 'LOANED') {
-        machine.loanTo = loanTo;
-        machine.loanDueDate = loanDueDate;
-      } else {
-        machine.loanTo = undefined;
-        machine.loanDueDate = undefined;
-      }
-
-      this.statusLogs.unshift({
-        logId: `LOG-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        timestamp: now,
-        assetCode: machine.assetCode,
-        oldStatus,
-        newStatus,
-        byUser: username,
-        note: reason || 'Diubah bersamaan dengan pemindahan lokasi',
-        loanTo,
-        loanDueDate,
-      });
-    }
-
-    const movement: Movement = {
-      movementId: `MOV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: now,
-      assetCode: machine.assetCode,
-      type: 'MOVE',
-      fromLocation: fromLoc,
-      toLocation: finalTargetLocationId,
-      fromSite: machine.siteId,
-      toSite: machine.siteId,
-      reason: reason || (newStatus === 'SOLD' ? 'Status diubah menjadi SOLD (Terjual/Afkir)' : 'Pemindahan normal oleh mekanik'),
-      byUser: username,
-    };
-
-    const targetLocDisplayName = newStatus === 'SOLD'
-      ? 'SOLD (Terjual/Afkir)'
-      : (this.locations.find((l) => l.locationId === finalTargetLocationId)?.displayName || finalTargetLocationId);
-
-    this.movements.unshift(movement);
-    this.logAudit(username, 'MOVE_MACHINE', `Pindah ${machine.assetCode} dari ${fromLoc} ke ${finalTargetLocationId}`);
-    this.save();
-    this.notifyListeners();
-
+    const { assetCode, targetLocationId, reason, newStatus, loanTo, loanDueDate } = params;
+    const res = await this.rpc('move_machine', {
+      p_asset_code: assetCode,
+      p_location_id: targetLocationId ? targetLocationId : null,
+      p_status: newStatus ? newStatus : null,
+      p_reason: reason ? reason : null,
+      p_loan_to: loanTo ? loanTo : null,
+      p_loan_due_date: loanDueDate ? loanDueDate : null,
+      p_request_id: uuid(),
+    });
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation([assetCode]);
     return {
       success: true,
-      message: newStatus === 'SOLD'
-        ? `Status mesin ${machine.assetCode} berhasil diubah menjadi SOLD (Terjual/Afkir).`
-        : `Mesin ${machine.assetCode} berhasil dipindahkan ke ${targetLocDisplayName}.`,
-      machine,
-      movement,
+      message: res.message,
+      machine: this.assetCodeMap.get(assetCode.toUpperCase()),
+      movement: this.movements[0],
     };
   }
 
-  /**
-   * Undo Last Move within 60 minutes by same user (A5.5)
-   * Menunggu respons server (UNDO_MOVE), hanya terapkan di lokal jika server sukses.
-   */
   public async undoLastMove(params: {
     assetCode: string;
     username: string;
     isAdmin: boolean;
   }): Promise<{ success: boolean; message: string }> {
-    const { assetCode, username, isAdmin } = params;
-    const machine = this.assetCodeMap.get(assetCode.toUpperCase());
-    if (!machine) {
-      return { success: false, message: 'Mesin tidak ditemukan.' };
+    const code = params.assetCode.trim().toUpperCase();
+    const { data, error } = await supabase
+      .from('movements')
+      .select('id, movement_type')
+      .eq('asset_code', code)
+      .order('id', { ascending: false })
+      .limit(1);
+    if (error) return { success: false, message: errMessage(error) };
+    const last = ((data ?? []) as Row[])[0];
+    if (!last) return { success: false, message: 'Belum ada riwayat pemindahan untuk mesin ini.' };
+    if (last.movement_type !== 'MOVE' && last.movement_type !== 'STATUS_CHANGE') {
+      return { success: false, message: 'Perubahan terakhir mesin ini bukan pemindahan biasa, jadi tidak bisa di-undo.' };
     }
-
-    const lastMov = this.movements.find((m) => m.assetCode === machine.assetCode && m.type !== 'UNDO');
-    if (!lastMov) {
-      return { success: false, message: 'Tidak ada riwayat pemindahan untuk mesin ini.' };
-    }
-
-    if (!isAdmin && lastMov.byUser !== username) {
-      return { success: false, message: `Hanya user yang memindahkan (${lastMov.byUser}) atau Admin yang bisa membatalkan.` };
-    }
-
-    const moveTime = new Date(lastMov.timestamp).getTime();
-    const now = Date.now();
-    const diffMinutes = (now - moveTime) / (1000 * 60);
-
-    if (diffMinutes > this.settings.undoTimeLimitMinutes) {
-      return { success: false, message: `Batas waktu Undo (${this.settings.undoTimeLimitMinutes} menit) telah terlewati.` };
-    }
-
-    const previousLocation = lastMov.fromLocation;
-    const currentLocation = machine.locationId;
-    const isoNow = new Date().toISOString();
-
-    // Kirim UNDO_MOVE ke server TERLEBIH DAHULU
-    try {
-      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('UNDO_MOVE', {
-        assetCode: machine.assetCode,
-        historyId: lastMov.movementId,
-      });
-
-      if (!serverRes || !serverRes.success) {
-        return {
-          success: false,
-          message: serverRes?.message || 'Gagal membatalkan pemindahan di server.',
-        };
-      }
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server untuk membatalkan pemindahan.',
-      };
-    }
-
-    // Hanya jika server berhasil, terapkan di lokal
-    machine.locationId = previousLocation;
-    machine.lastMovedAt = isoNow;
-    machine.lastMovedBy = `${username} (UNDO)`;
-    machine.updatedAt = isoNow;
-    machine.updatedBy = username;
-
-    const undoMovement: Movement = {
-      movementId: `MOV-UNDO-${Date.now()}`,
-      timestamp: isoNow,
-      assetCode: machine.assetCode,
-      type: 'UNDO',
-      fromLocation: currentLocation,
-      toLocation: previousLocation,
-      fromSite: machine.siteId,
-      toSite: machine.siteId,
-      reason: `Undo pemindahan terakhir (${lastMov.movementId})`,
-      byUser: username,
-    };
-
-    this.movements.unshift(undoMovement);
-    this.logAudit(username, 'UNDO_MOVE', `Undo ${machine.assetCode} kembali ke ${previousLocation}`);
-    this.save();
-    this.notifyListeners();
-
-    return { success: true, message: `Pemindahan dibatalkan. Mesin ${machine.assetCode} dikembalikan ke ${previousLocation}.` };
+    const res = await this.rpc('undo_move', { p_movement_id: last.id, p_request_id: uuid() });
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation([code]);
+    return { success: true, message: res.message };
   }
 
-  /**
-   * Pemindahan lokasi langsung (digunakan oleh Rack Mapping WH2 & integrasi backend)
-   */
-  public setMachineLocationDirect(params: {
-    assetCode: string;
-    locationId: string;
-    siteId?: string;
-    username: string;
-    reason?: string;
-  }): { success: boolean; message: string } {
-    const { assetCode, locationId, username, reason } = params;
-    const siteId = params.siteId || 'WH2';
-    const machine = this.assetCodeMap.get(assetCode.toUpperCase());
-    if (!machine) {
-      return { success: false, message: `Mesin ${assetCode} tidak ditemukan di database lokal.` };
-    }
-
-    const fromLoc = machine.locationId;
-    const now = new Date().toISOString();
-
-    machine.locationId = locationId;
-    machine.siteId = siteId;
-    machine.lastMovedAt = now;
-    machine.lastMovedBy = username;
-    machine.updatedAt = now;
-    machine.updatedBy = username;
-
-    const movement: Movement = {
-      movementId: `MOV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: now,
-      assetCode: machine.assetCode,
-      type: 'MOVE',
-      fromLocation: fromLoc,
-      toLocation: locationId,
-      fromSite: machine.siteId,
-      toSite: siteId,
-      reason: reason || `Penempatan di rak ${locationId}`,
-      byUser: username,
-    };
-
-    this.movements.unshift(movement);
-    this.logAudit(username, 'ASSIGN_RACK_SLOT', `Pindah ${machine.assetCode} dari ${fromLoc} ke ${locationId}`);
-    this.save();
-    this.notifyListeners();
-
-    return { success: true, message: `Mesin ${machine.assetCode} berhasil ditempatkan di ${locationId}.` };
-  }
-
-  /**
-   * Transfer Step 1: Send Transfer to another site (Fase 4 & A5.2)
-   */
   public async sendTransfer(params: {
     assetCodes: string[];
     toSite: string;
@@ -687,611 +756,281 @@ class StorageService {
     count: number;
     skipped?: { code: string; reason: 'NOT_FOUND' | 'NO_ACCESS' | 'PENDING' | 'SOLD' | 'SAME_SITE'; assetCode?: string }[];
   }> {
-    const { assetCodes, toSite, sentBy, userSiteAccess, vehicleNo, driverName, note } = params;
-
-    const validCodes: string[] = [];
-    const validMachines: Machine[] = [];
-    const seenAssetCodes = new Set<string>();
-    const skipped: { code: string; reason: 'NOT_FOUND' | 'NO_ACCESS' | 'PENDING' | 'SOLD' | 'SAME_SITE'; assetCode?: string }[] = [];
-
-    for (const rawCode of assetCodes) {
-      const clean = (rawCode || '').trim();
-      if (!clean) continue;
-
-      // 1. Resolve via getMachineByCode (support Barcode, Asset Code, and Serial)
-      const { machine } = this.getMachineByCode(clean);
-      if (!machine) {
-        skipped.push({ code: clean, reason: 'NOT_FOUND' });
-        continue;
-      }
-
-      // 2. Prevent duplicate machines in the same batch
-      const upperAsset = machine.assetCode.toUpperCase();
-      if (seenAssetCodes.has(upperAsset)) {
-        continue;
-      }
-
-      // 3. Validate user site access permission
-      if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(machine.siteId)) {
-        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'NO_ACCESS' });
-        continue;
-      }
-
-      // 4. Validate machine is not already pending transfer
-      if (machine.pendingTransferId) {
-        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'PENDING' });
-        continue;
-      }
-
-      // 5. Validate machine is not sold
-      if (machine.status === 'SOLD') {
-        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'SOLD' });
-        continue;
-      }
-
-      // 6. Validate destination is not the same site
-      if (machine.siteId === toSite) {
-        skipped.push({ code: clean, assetCode: machine.assetCode, reason: 'SAME_SITE' });
-        continue;
-      }
-
-      seenAssetCodes.add(upperAsset);
-      validCodes.push(machine.assetCode);
-      validMachines.push(machine);
-    }
-
-    if (validCodes.length === 0) {
-      const reasonsMap: Record<string, number> = {};
-      skipped.forEach((s) => {
-        reasonsMap[s.reason] = (reasonsMap[s.reason] || 0) + 1;
-      });
-
-      const reasonDetails: string[] = [];
-      if (reasonsMap.NOT_FOUND) reasonDetails.push(`${reasonsMap.NOT_FOUND} tidak ditemukan`);
-      if (reasonsMap.PENDING) reasonDetails.push(`${reasonsMap.PENDING} sedang transfer`);
-      if (reasonsMap.NO_ACCESS) reasonDetails.push(`${reasonsMap.NO_ACCESS} di luar akses site`);
-      if (reasonsMap.SOLD) reasonDetails.push(`${reasonsMap.SOLD} berstatus SOLD`);
-      if (reasonsMap.SAME_SITE) reasonDetails.push(`${reasonsMap.SAME_SITE} sudah di site tujuan (${toSite})`);
-
-      const detailStr = reasonDetails.length > 0 ? `: ${reasonDetails.join(', ')}` : '';
-      return {
-        success: false,
-        message: `Tidak ada mesin yang valid untuk dikirim${detailStr}.`,
-        count: 0,
-        skipped,
-      };
-    }
-
-    const firstMachine = validMachines[0];
-    const fromSite = firstMachine?.siteId || '';
-
-    // Wait for server response first
-    try {
-      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('SEND_TRANSFER', {
-        assetCodes: validCodes,
-        fromSite,
-        toSite,
-        vehicleNo: vehicleNo || '',
-        driverName: driverName || '',
-        note: note || '',
-      });
-
-      if (!serverRes || !serverRes.success) {
-        return {
-          success: false,
-          message: serverRes?.message || 'Gagal mengirim transfer di server.',
-          count: 0,
-          skipped,
-        };
-      }
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server untuk mengirim transfer.',
-        count: 0,
-        skipped,
-      };
-    }
-
-    // Apply mutation locally only after server success
-    let count = 0;
-    const now = new Date().toISOString();
-    const batchId = `BATCH-${Date.now()}`;
-
-    for (const machine of validMachines) {
-      const transferId = `TRF-${Date.now()}-${count + 1}`;
-      machine.pendingTransferId = transferId;
-      machine.updatedAt = now;
-      machine.updatedBy = sentBy;
-
-      const transfer: Transfer = {
-        transferId,
-        batchId,
-        assetCode: machine.assetCode,
-        fromSite: machine.siteId,
-        toSite: toSite as SiteId,
-        status: 'IN_TRANSIT',
-        sentAt: now,
-        sentBy,
-        note,
-      };
-
-      this.transfers.unshift(transfer);
-
-      this.movements.unshift({
-        movementId: `MOV-${Date.now()}-${count + 1}`,
-        timestamp: now,
-        assetCode: machine.assetCode,
-        type: 'TRANSFER_OUT',
-        fromLocation: machine.locationId,
-        toLocation: `${toSite}-IN_TRANSIT`,
-        fromSite: machine.siteId,
-        toSite: toSite as SiteId,
-        transferId,
-        reason: `Transfer keluar ke ${toSite}: ${note || ''}`,
-        byUser: sentBy,
-      });
-
-      count++;
-    }
-
-    this.logAudit(sentBy, 'SEND_TRANSFER', `Mengirim ${count} mesin ke site ${toSite}`);
-    this.save();
-    this.notifyListeners();
-
-    const skippedInfo = skipped.length > 0 ? ` (${skipped.length} kode lain dilewati)` : '';
-    return {
-      success: true,
-      message: `${count} mesin berhasil dikirim ke ${toSite} (Status: In Transit)${skippedInfo}.`,
-      count,
-      skipped,
-    };
+    const res = await this.rpc('send_transfer', {
+      p_asset_codes: params.assetCodes,
+      p_to_site: params.toSite,
+      p_note: params.note ? params.note : null,
+      p_vehicle_no: params.vehicleNo ? params.vehicleNo : null,
+      p_driver_name: params.driverName ? params.driverName : null,
+      p_request_id: uuid(),
+    });
+    if (!res.success) return { success: false, message: res.message, count: 0, skipped: [] };
+    await this.afterMutation(params.assetCodes);
+    return { success: true, message: res.message, count: Number(res.data.count ?? params.assetCodes.length), skipped: [] };
   }
 
-  /**
-   * Transfer Step 2: Receive Transfer at destination site (Fase 4 & A5.2)
-   */
   public async receiveTransfer(params: {
     transferId: string;
     toLocationId: string;
     receivedBy: string;
     userSiteAccess: string[];
   }): Promise<{ success: boolean; message: string }> {
-    const { transferId, toLocationId, receivedBy, userSiteAccess } = params;
-
-    const transfer = this.transfers.find((t) => t.transferId === transferId);
-    if (!transfer) {
-      return { success: false, message: 'Transfer ID tidak ditemukan.' };
-    }
-
-    if (transfer.status !== 'IN_TRANSIT') {
-      return { success: false, message: `Transfer ini sudah dalam status ${transfer.status}.` };
-    }
-
-    if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(transfer.toSite)) {
-      return { success: false, message: `Akses ditolak: Anda tidak memiliki izin untuk menerima mesin di site ${transfer.toSite}.` };
-    }
-
-    const machine = this.assetCodeMap.get(transfer.assetCode.toUpperCase());
-    if (!machine) {
-      return { success: false, message: 'Mesin terkait transfer ini tidak ditemukan.' };
-    }
-
-    const targetLoc = this.locations.find((l) => l.locationId === toLocationId);
-    if (!targetLoc || targetLoc.siteId !== transfer.toSite) {
-      return { success: false, message: `Lokasi tujuan harus berada di site penerima (${transfer.toSite}).` };
-    }
-
-    // Check WH2 rack slot capacity if destination is WH2 rack
-    if (targetLoc.type === 'RACK_SLOT') {
-      const currentSlotMachines = this.getMachinesAtLocation(toLocationId);
-      const limit = targetLoc.capacity || this.settings.rackSlotCapacity || 3;
-      if (currentSlotMachines.length >= limit) {
-        return { success: false, message: `Slot ${targetLoc.displayName} sudah penuh (maksimal ${limit} mesin).` };
-      }
-    }
-
-    // Wait for server response
-    try {
-      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('RECEIVE_TRANSFER', {
-        transferId,
-        toLocationId,
-        toSite: transfer.toSite,
-      });
-
-      if (!serverRes || !serverRes.success) {
-        return {
-          success: false,
-          message: serverRes?.message || 'Gagal menerima transfer di server.',
-        };
-      }
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server untuk menerima transfer.',
-      };
-    }
-
-    const now = new Date().toISOString();
-    const oldSite = machine.siteId;
-    const oldLoc = machine.locationId;
-
-    transfer.status = 'RECEIVED';
-    transfer.receivedAt = now;
-    transfer.receivedBy = receivedBy;
-    transfer.toLocation = toLocationId;
-
-    machine.pendingTransferId = undefined;
-    machine.siteId = transfer.toSite;
-    machine.locationId = toLocationId;
-    machine.lastMovedAt = now;
-    machine.lastMovedBy = receivedBy;
-    machine.updatedAt = now;
-    machine.updatedBy = receivedBy;
-
-    this.movements.unshift({
-      movementId: `MOV-${Date.now()}`,
-      timestamp: now,
-      assetCode: machine.assetCode,
-      type: 'TRANSFER_IN',
-      fromLocation: oldLoc,
-      toLocation: toLocationId,
-      fromSite: oldSite,
-      toSite: transfer.toSite,
-      transferId,
-      reason: `Transfer diterima dari ${oldSite} oleh ${receivedBy}`,
-      byUser: receivedBy,
+    const meta = this.transferMeta.get(params.transferId);
+    if (!meta) return { success: false, message: 'Transfer tidak ditemukan. Muat ulang data lalu coba lagi.' };
+    const res = await this.rpc('receive_transfer', {
+      p_transfer_id: meta.orderId,
+      p_to_location_id: params.toLocationId,
+      p_asset_codes: [meta.assetCode],
+      p_request_id: uuid(),
     });
-
-    this.logAudit(receivedBy, 'RECEIVE_TRANSFER', `Menerima mesin ${machine.assetCode} di ${toLocationId}`);
-    this.save();
-    this.notifyListeners();
-
-    return { success: true, message: `Mesin ${machine.assetCode} berhasil diterima dan ditempatkan di ${targetLoc.displayName}.` };
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation([meta.assetCode]);
+    return { success: true, message: res.message };
   }
 
-  /**
-   * Cancel Transfer before receipt (A5.2)
-   */
-  public async cancelTransfer(transferId: string, username: string, userSiteAccess: string[]): Promise<{ success: boolean; message: string }> {
-    const transfer = this.transfers.find((t) => t.transferId === transferId);
-    if (!transfer) return { success: false, message: 'Transfer tidak ditemukan.' };
-    if (transfer.status !== 'IN_TRANSIT') return { success: false, message: 'Hanya transfer In Transit yang dapat dibatalkan.' };
+  public async cancelTransfer(
+    transferId: string,
+    _username: string,
+    _userSiteAccess: string[]
+  ): Promise<{ success: boolean; message: string }> {
+    const meta = this.transferMeta.get(transferId);
+    if (!meta) return { success: false, message: 'Transfer tidak ditemukan. Muat ulang data lalu coba lagi.' };
+    const res = await this.rpc('cancel_transfer', {
+      p_transfer_id: meta.orderId,
+      p_asset_codes: [meta.assetCode],
+      p_request_id: uuid(),
+    });
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation([meta.assetCode]);
+    return { success: true, message: res.message };
+  }
 
-    if (!userSiteAccess.includes('ALL') && !userSiteAccess.includes(transfer.fromSite)) {
-      return { success: false, message: 'Hanya pengirim dari site asal atau Admin yang bisa membatalkan transfer.' };
-    }
+  private async resolveSessionId(sessionNo: string): Promise<number | null> {
+    const { data, error } = await supabase.from('opname_sessions').select('id').eq('session_no', sessionNo).limit(1);
+    if (error) return null;
+    const row = ((data ?? []) as Row[])[0];
+    return row ? Number(row.id) : null;
+  }
 
-    const machine = this.assetCodeMap.get(transfer.assetCode.toUpperCase());
+  private static readonly OPNAME_SESSION_COLS =
+    'session_no, site_id, location_id, status, allowed_sites, lock_moves, started_by_nik, started_at, ended_at, ' +
+    'expected_count, scanned_count, match_count, missing_count, misplaced_count';
 
-    // Wait for server response
+  private mapServerOpnameSession(r: Row): ServerOpnameSession {
+    return {
+      sessionId: String(r.session_no),
+      siteId: String(r.site_id),
+      locationId: r.location_id ?? undefined,
+      status: r.status as ServerOpnameSession['status'],
+      allowedSites: Array.isArray(r.allowed_sites) ? (r.allowed_sites as string[]) : [],
+      lockMoves: Boolean(r.lock_moves),
+      startedBy: String(r.started_by_nik ?? ''),
+      startedAt: String(r.started_at),
+      endedAt: r.ended_at ?? undefined,
+      expected: Number(r.expected_count ?? 0),
+      scanned: Number(r.scanned_count ?? 0),
+      match: Number(r.match_count ?? 0),
+      missing: Number(r.missing_count ?? 0),
+      misplaced: Number(r.misplaced_count ?? 0),
+      week: isoWeek(String(r.started_at)),
+    };
+  }
+
+  /** Daftar sesi opname yang terlihat oleh pengguna (RLS: dibuat sendiri, atau site yang diizinkan). */
+  public async listOpnameSessions(): Promise<{ success: boolean; sessions: ServerOpnameSession[]; message?: string }> {
     try {
-      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('CANCEL_TRANSFER', {
-        transferId,
-        assetCode: machine?.assetCode || transfer.assetCode,
-      });
-
-      if (!serverRes || !serverRes.success) {
-        return {
-          success: false,
-          message: serverRes?.message || 'Gagal membatalkan transfer di server.',
-        };
-      }
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server untuk membatalkan transfer.',
-      };
+      const { data, error } = await supabase
+        .from('opname_sessions')
+        .select(StorageService.OPNAME_SESSION_COLS)
+        .order('id', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return { success: true, sessions: ((data ?? []) as Row[]).map((r) => this.mapServerOpnameSession(r)) };
+    } catch (e) {
+      if (isAuthError(e)) emitUnauthorized();
+      return { success: false, sessions: [], message: errMessage(e) };
     }
-
-    if (machine) {
-      machine.pendingTransferId = undefined;
-    }
-
-    transfer.status = 'CANCELLED';
-    this.logAudit(username, 'CANCEL_TRANSFER', `Membatalkan transfer ${transferId} (${transfer.assetCode})`);
-    this.save();
-    this.notifyListeners();
-
-    return { success: true, message: `Transfer ${transferId} berhasil dibatalkan.` };
   }
 
-  /**
-   * Start / Save Opname Session (Fase 5 & A5.4)
-   */
+  public async startOpnameSession(params: {
+    siteId: string;
+    locationId?: string;
+    allowedSites?: string[];
+    lockMoves?: boolean;
+  }): Promise<{ success: boolean; message: string; session?: ServerOpnameSession }> {
+    const res = await this.rpc('start_opname_session', {
+      p_site_id: params.siteId,
+      p_location_id: params.locationId || null,
+      p_allowed_sites: params.allowedSites && params.allowedSites.length ? params.allowedSites : null,
+      p_lock_moves: Boolean(params.lockMoves),
+      p_request_id: uuid(),
+    });
+    if (!res.success) return { success: false, message: res.message };
+    const { data, error } = await supabase
+      .from('opname_sessions')
+      .select(StorageService.OPNAME_SESSION_COLS)
+      .eq('id', res.data.session_id)
+      .maybeSingle();
+    if (error || !data) return { success: false, message: 'Sesi dibuat, tapi gagal memuat detailnya. Segarkan halaman.' };
+    return { success: true, message: res.message, session: this.mapServerOpnameSession(data) };
+  }
+
+  public async updateOpnameAccess(params: {
+    sessionId: string;
+    allowedSites: string[];
+    lockMoves: boolean;
+  }): Promise<{ success: boolean; message: string; session?: ServerOpnameSession }> {
+    const id = await this.resolveSessionId(params.sessionId);
+    if (id == null) return { success: false, message: 'Sesi opname tidak ditemukan di server.' };
+    const res = await this.rpc('update_opname_access', {
+      p_session_id: id,
+      p_allowed_sites: params.allowedSites,
+      p_lock_moves: params.lockMoves,
+    });
+    if (!res.success) return { success: false, message: res.message };
+    const { data, error } = await supabase
+      .from('opname_sessions')
+      .select(StorageService.OPNAME_SESSION_COLS)
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data) return { success: false, message: 'Akses diperbarui, tapi gagal memuat ulang detailnya. Segarkan halaman.' };
+    try {
+      await this.loadOpnameSessions();
+      this.notify();
+    } catch {
+      /* abaikan */
+    }
+    return { success: true, message: res.message, session: this.mapServerOpnameSession(data) };
+  }
+
+  /** Menutup sesi (COMPLETED/CANCELLED) beserta hasil scan. Dipakai OpnameView; bentuk item mengikuti field lokal OpnameView (camelCase scannedLocationId/expectedLocationId). */
+  public async closeOpnameSession(
+    session: { sessionId: string; status: 'COMPLETED' | 'CANCELLED' },
+    items: {
+      assetCode: string;
+      barcode?: string;
+      result: string;
+      scannedLocationId?: string;
+      expectedLocationId?: string;
+    }[]
+  ): Promise<{ success: boolean; message: string }> {
+    const id = await this.resolveSessionId(session.sessionId);
+    if (id == null) return { success: false, message: 'Sesi opname tidak ditemukan di server.' };
+    const res = await this.rpc('save_opname', {
+      p_session_id: id,
+      p_items: items.map((it) => ({
+        asset_code: it.assetCode,
+        barcode: it.barcode ?? null,
+        result: it.result,
+        scanned_location_id: it.scannedLocationId ?? null,
+        expected_location_id: it.expectedLocationId ?? null,
+      })),
+      p_status: session.status,
+      p_request_id: uuid(),
+    });
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation(items.map((i) => i.assetCode));
+    try {
+      await this.loadOpnameSessions();
+      this.notify();
+    } catch {
+      /* abaikan */
+    }
+    return { success: true, message: res.message };
+  }
+
   public async saveOpnameSession(session: OpnameSession, items: OpnameItem[]): Promise<{ success: boolean; message: string }> {
-    // Wait for server response
+    const id = await this.resolveSessionId(session.sessionId);
+    if (id == null) return { success: false, message: 'Sesi opname tidak ditemukan di server.' };
+    const status = session.status === 'IN_PROGRESS' ? 'ACTIVE' : session.status;
+    const res = await this.rpc('save_opname', {
+      p_session_id: id,
+      p_items: items.map((it) => ({
+        asset_code: it.assetCode,
+        barcode: it.barcode ?? null,
+        result: it.result,
+        scanned_location_id: it.currentActualLocation ?? null,
+        expected_location_id: it.registeredLocation ?? null,
+        resolution: it.resolution ?? null,
+      })),
+      p_status: status,
+      p_request_id: uuid(),
+    });
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation(items.map((i) => i.assetCode));
     try {
-      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('SAVE_OPNAME', {
-        session,
-        items: items.map((it) => ({
-          assetCode: it.assetCode,
-          barcode: it.barcode,
-          result: it.result,
-          scannedLocationId: it.currentActualLocation,
-          expectedLocationId: it.registeredLocation,
-        })),
-      });
-
-      if (!serverRes || !serverRes.success) {
-        return {
-          success: false,
-          message: serverRes?.message || 'Gagal menyimpan sesi opname di server.',
-        };
-      }
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server untuk menyimpan sesi opname.',
-      };
+      await this.loadOpnameSessions();
+      this.notify();
+    } catch {
+      /* abaikan */
     }
-
-    // Check if session exists
-    const idx = this.opnameSessions.findIndex((s) => s.sessionId === session.sessionId);
-    if (idx >= 0) {
-      this.opnameSessions[idx] = session;
-    } else {
-      this.opnameSessions.unshift(session);
-    }
-
-    // Save items
-    this.opnameItems = this.opnameItems.filter((i) => i.sessionId !== session.sessionId).concat(items);
-
-    // If completed, update lastOpnameAt for all MATCH items
-    if (session.status === 'COMPLETED') {
-      const now = new Date().toISOString();
-      for (const item of items) {
-        if (item.result === 'MATCH') {
-          const machine = this.assetCodeMap.get(item.assetCode.toUpperCase());
-          if (machine) {
-            machine.lastOpnameAt = now;
-          }
-        }
-      }
-    }
-
-    this.logAudit(session.startedBy, 'OPNAME_SESSION', `Opname sesi ${session.sessionId} di ${session.locationId} (${session.status})`);
-    this.save();
-    this.notifyListeners();
-
-    return { success: true, message: 'Sesi opname berhasil disimpan.' };
+    return { success: true, message: res.message };
   }
 
-  /**
-   * Quick Relocate Misplaced Machine during Opname (A5.4)
-   */
+  /** Mesin salah lokasi saat opname dipindahkan ke lokasi sesi (lewat fungsi pindah biasa). */
   public async resolveOpnameMisplaced(params: {
     assetCode: string;
     targetLocationId: string;
     username: string;
     sessionId: string;
   }): Promise<{ success: boolean; message: string }> {
-    const { assetCode, targetLocationId, username, sessionId } = params;
-    const machine = this.assetCodeMap.get(assetCode.toUpperCase());
-    if (!machine) return { success: false, message: 'Mesin tidak ditemukan.' };
-
-    const oldLoc = machine.locationId;
-    const now = new Date().toISOString();
-
-    // Wait for server response
-    try {
-      const serverRes = await this.postToGasBackend<{ success: boolean; message?: string }>('MOVE_MACHINE', {
-        assetCode: machine.assetCode,
-        barcode: machine.barcode,
-        locationId: targetLocationId,
-        siteId: machine.siteId,
-        status: machine.status,
-        reason: `Koreksi hasil opname: pindah langsung ke lokasi fisik (${targetLocationId})`,
-      });
-
-      if (!serverRes || !serverRes.success) {
-        return {
-          success: false,
-          message: serverRes?.message || 'Gagal memindahkan mesin di server.',
-        };
-      }
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server untuk memindahkan mesin.',
-      };
-    }
-
-    machine.locationId = targetLocationId;
-    machine.lastMovedAt = now;
-    machine.lastMovedBy = username;
-    machine.lastOpnameAt = now;
-    machine.updatedAt = now;
-    machine.updatedBy = username;
-
-    this.movements.unshift({
-      movementId: `MOV-OPNAME-${Date.now()}`,
-      timestamp: now,
-      assetCode: machine.assetCode,
-      type: 'OPNAME_FIX',
-      fromLocation: oldLoc,
-      toLocation: targetLocationId,
-      fromSite: machine.siteId,
-      toSite: machine.siteId,
-      opnameSessionId: sessionId,
-      reason: `Koreksi hasil opname: pindah langsung ke lokasi fisik (${targetLocationId})`,
-      byUser: username,
+    const res = await this.rpc('move_machine', {
+      p_asset_code: params.assetCode,
+      p_location_id: params.targetLocationId,
+      p_status: null,
+      p_reason: `Opname ${params.sessionId}: dipindahkan ke lokasi yang sesuai`,
+      p_loan_to: null,
+      p_loan_due_date: null,
+      p_request_id: uuid(),
     });
-
-    this.logAudit(username, 'OPNAME_RESOLVE', `Pindah mesin salah tempat ${assetCode} ke ${targetLocationId}`);
-    this.save();
-    this.notifyListeners();
-
-    return { success: true, message: `Mesin ${assetCode} berhasil diperbarui lokasinya ke ${targetLocationId}.` };
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation([params.assetCode]);
+    return { success: true, message: res.message };
   }
 
-  /**
-   * Generate & Dispatch Daily Report (Fase 6 & A7)
-   */
+  // ---------------------------------------------------------------- fitur yang belum tersedia (jujur, tanpa pura-pura)
   public generateDailyReport(siteId: string = 'ALL'): DailyReport {
-    const today = new Date().toISOString().split('T')[0];
-    const now = new Date().toISOString();
-
-    const filteredMoves = this.movements.filter((m) => {
-      const isToday = m.timestamp.startsWith(today);
-      if (siteId === 'ALL') return isToday;
-      return isToday && (m.fromSite === siteId || m.toSite === siteId);
-    });
-
-    const filteredTransfers = this.transfers.filter((t) => {
-      if (siteId === 'ALL') return true;
-      return t.fromSite === siteId || t.toSite === siteId;
-    });
-
-    const transfersPending = filteredTransfers.filter((t) => t.status === 'IN_TRANSIT').length;
-    const transfersSent = filteredTransfers.filter((t) => t.status === 'IN_TRANSIT' && t.sentAt.startsWith(today)).length;
-    const transfersReceived = filteredTransfers.filter((t) => t.status === 'RECEIVED' && t.receivedAt && t.receivedAt.startsWith(today)).length;
-
-    const opnameSessionsToday = this.opnameSessions.filter((s) => {
-      const isToday = s.startedAt.startsWith(today);
-      if (siteId === 'ALL') return isToday;
-      return isToday && s.siteId === siteId;
-    });
-
-    const missingCount = opnameSessionsToday.reduce((acc, s) => acc + s.missing, 0);
-    const misplacedCount = opnameSessionsToday.reduce((acc, s) => acc + s.misplaced, 0);
-
-    const report: DailyReport = {
-      reportId: `RPT-${today}-${siteId}`,
-      date: today,
+    return {
+      reportId: 'BELUM-TERSEDIA',
+      date: new Date().toISOString().slice(0, 10),
       siteId,
-      sentAt: now,
-      content: `Ringkasan Laporan Harian Aset Mesin PT.WINNERS - ${siteId} (${today})`,
+      content: 'Laporan harian belum tersedia di versi Supabase.',
       stats: {
-        totalMoves: filteredMoves.length,
-        transfersSent,
-        transfersReceived,
-        transfersPending,
-        statusChanges: this.statusLogs.filter((s) => s.timestamp.startsWith(today)).length,
-        opnameLocationsCompleted: opnameSessionsToday.filter((s) => s.status === 'COMPLETED').length,
-        opnameMissingCount: missingCount,
-        opnameMisplacedCount: misplacedCount,
+        totalMoves: 0,
+        transfersSent: 0,
+        transfersReceived: 0,
+        transfersPending: 0,
+        statusChanges: 0,
+        opnameLocationsCompleted: 0,
+        opnameMissingCount: 0,
+        opnameMisplacedCount: 0,
       },
     };
-
-    this.dailyReports.unshift(report);
-    this.logAudit('SYSTEM_CRON', 'DAILY_REPORT', `Laporan harian dibuat untuk ${siteId}`);
-    this.save();
-
-    return report;
   }
 
-  // --- ADMIN CONFIGURATION APIS ---
-
-  public addSite(newSite: Site, addLineTemplate: boolean = true): { success: boolean; message: string } {
-    if (this.sites.some((s) => s.siteId === newSite.siteId)) {
-      return { success: false, message: `Site dengan ID ${newSite.siteId} sudah ada.` };
-    }
-    this.sites.push(newSite);
-
-    if (addLineTemplate) {
-      let maxOrder = Math.max(...this.locations.map((l) => l.sortOrder), 0);
-      for (let i = 1; i <= 30; i++) {
-        const num = String(i).padStart(2, '0');
-        this.locations.push({
-          locationId: `${newSite.siteId}-L${num}`,
-          siteId: newSite.siteId,
-          type: 'LINE',
-          displayName: `Line ${num}`,
-          active: true,
-          sortOrder: ++maxOrder,
-        });
-      }
-      this.locations.push({
-        locationId: `${newSite.siteId}-UNASSIGNED`,
-        siteId: newSite.siteId,
-        type: 'UNASSIGNED',
-        displayName: `${newSite.name} Belum Ditentukan Line`,
-        active: true,
-        sortOrder: ++maxOrder,
-      });
-    }
-
-    this.save();
-    return { success: true, message: `Site ${newSite.name} berhasil ditambahkan.` };
+  public addSite(_newSite: Site, _addLineTemplate: boolean = true): { success: boolean; message: string } {
+    return { success: false, message: NOT_AVAILABLE };
   }
 
-  public updateRackConfig(rackNo: number, columnCount: number): { success: boolean; message: string } {
-    const rack = this.racks.find((r) => r.rackNo === rackNo);
-    if (!rack) return { success: false, message: 'Rak tidak ditemukan.' };
-
-    rack.columnCount = columnCount;
-
-    // Generate any missing slots
-    let maxOrder = Math.max(...this.locations.map((l) => l.sortOrder), 0);
-    for (let col = 1; col <= columnCount; col++) {
-      ['A', 'B', 'C'].forEach((stack) => {
-        const slotId = `WH2-R${rackNo}-${col}${stack}`;
-        if (!this.locations.some((l) => l.locationId === slotId)) {
-          this.locations.push({
-            locationId: slotId,
-            siteId: 'WH2',
-            type: 'RACK_SLOT',
-            displayName: `Rak ${rackNo} Kolom ${col} Stack ${stack}`,
-            rackNo,
-            columnNo: col,
-            stack,
-            capacity: 3,
-            active: true,
-            sortOrder: ++maxOrder,
-          });
-        }
-      });
-    }
-
-    this.save();
-    return { success: true, message: `Konfigurasi Rak ${rackNo} diperbarui (${columnCount} kolom).` };
+  public updateRackConfig(_rackNo: number, _columnCount: number): { success: boolean; message: string } {
+    return { success: false, message: NOT_AVAILABLE };
   }
 
-  public addLocation(loc: Location): { success: boolean; message: string } {
-    if (this.locations.some((l) => l.locationId === loc.locationId)) {
-      return { success: false, message: `Lokasi ${loc.locationId} sudah ada.` };
-    }
-    this.locations.push(loc);
-    this.save();
-    return { success: true, message: `Lokasi ${loc.displayName} berhasil ditambahkan.` };
+  public addLocation(_loc: Location): { success: boolean; message: string } {
+    return { success: false, message: NOT_AVAILABLE };
   }
 
-  public toggleLocationActive(locationId: string): { success: boolean; message: string } {
-    const loc = this.locations.find((l) => l.locationId === locationId);
-    if (!loc) return { success: false, message: 'Lokasi tidak ditemukan.' };
-    loc.active = !loc.active;
-    this.save();
-    return { success: true, message: `Lokasi ${loc.displayName} sekarang ${loc.active ? 'Aktif' : 'Non-Aktif'}.` };
+  public toggleLocationActive(_locationId: string): { success: boolean; message: string } {
+    return { success: false, message: NOT_AVAILABLE };
   }
 
-  public saveUser(user: User): { success: boolean; message: string } {
-    const idx = this.users.findIndex((u) => u.username === user.username);
-    if (idx >= 0) {
-      this.users[idx] = user;
-    } else {
-      this.users.push(user);
-    }
-    this.save();
-    return { success: true, message: `Pengguna ${user.username} berhasil disimpan.` };
+  public saveUser(_user: User): { success: boolean; message: string } {
+    return { success: false, message: NOT_AVAILABLE };
   }
 
-  public unlockUser(username: string): { success: boolean; message: string } {
-    const u = this.users.find((x) => x.username === username);
-    if (!u) return { success: false, message: 'Pengguna tidak ditemukan.' };
-    u.failedAttempts = 0;
-    u.lockedUntil = undefined;
-    this.save();
-    return { success: true, message: `Akun ${username} berhasil dibuka kuncinya.` };
+  public unlockUser(_username: string): { success: boolean; message: string } {
+    return { success: false, message: 'Supabase tidak memakai kunci akun per NIK. Tidak ada yang perlu dibuka.' };
   }
-
-  public updateSettings(newSettings: AppSettings): { success: boolean; message: string } {
-    this.settings = { ...newSettings };
-    this.save();
-    return { success: true, message: 'Pengaturan sistem berhasil diperbarui.' };
-  }
-
-  // --- BAGIAN C DATA CLEANING AUTO-FIX SUITE ---
 
   public runDataAuditAndFix(): {
     fixedEmptyLocations: number;
@@ -1301,287 +1040,24 @@ class StorageService {
     normalizedLegacyCodes: number;
     flaggedSerials: number;
   } {
-    let fixedEmptyLocations = 0;
-    let fixedFacMappings = 0;
-    let fixedMissingNames = 0;
-    let fixedTrimSpaces = 0;
-    let normalizedLegacyCodes = 0;
-    let flaggedSerials = 0;
-
-    for (const m of this.machines) {
-      // 1. Check empty location
-      if (!m.locationId || m.locationId.trim() === '') {
-        const homeSite = m.homeFactory.includes('(1)') ? 'PW1' : m.homeFactory.includes('(2)') ? 'PW2' : 'PW3';
-        m.locationId = `${homeSite}-UNASSIGNED`;
-        m.siteId = homeSite;
-        fixedEmptyLocations++;
-      }
-
-      // 2. Normalize legacy codes (WH2 -> WH2-UNASSIGNED, SW -> SW-MAIN, QA -> QA-MAIN)
-      if (m.locationId === 'WH2') {
-        m.locationId = 'WH2-UNASSIGNED';
-        m.siteId = 'WH2';
-        normalizedLegacyCodes++;
-      } else if (m.locationId === 'SW') {
-        m.locationId = 'SW-MAIN';
-        m.siteId = 'SW';
-        normalizedLegacyCodes++;
-      } else if (m.locationId === 'QA') {
-        m.locationId = 'QA-MAIN';
-        m.siteId = 'QA';
-        normalizedLegacyCodes++;
-      }
-
-      // 3. Fix 3 missing Standard Machine Names from Checklist C
-      if (['IDN-8-2509-3775', 'IDN-9-2509-3776', 'IDN-10-2509-3777'].includes(m.assetCode) || !m.standardMachineName) {
-        m.standardMachineName = 'Automatic Placket Attaching Machine';
-        fixedMissingNames++;
-      }
-
-      // 4. Model trim hidden spaces
-      if (m.model && m.model !== m.model.trim()) {
-        m.model = m.model.trim();
-        fixedTrimSpaces++;
-      }
-
-      // 5. Flag serial with space
-      if (m.serial && m.serial.includes(' ')) {
-        m.dataFlag = 'SERIAL_SPACE';
-        flaggedSerials++;
-      }
-
-      // 6. Ensure Site ID matches Location ID prefix
-      if (m.locationId.includes('-')) {
-        const prefix = m.locationId.split('-')[0];
-        if (prefix && prefix !== m.siteId) {
-          m.siteId = prefix;
-          fixedFacMappings++;
-        }
-      }
-    }
-
-    this.rebuildIndices();
-    this.save();
+    // Constraint database sudah mencegah data rusak; tidak ada yang diperbaiki di klien.
     return {
-      fixedEmptyLocations,
-      fixedFacMappings,
-      fixedMissingNames,
-      fixedTrimSpaces,
-      normalizedLegacyCodes,
-      flaggedSerials,
+      fixedEmptyLocations: 0,
+      fixedFacMappings: 0,
+      fixedMissingNames: 0,
+      fixedTrimSpaces: 0,
+      normalizedLegacyCodes: 0,
+      flaggedSerials: 0,
     };
   }
 
-  public batchImportMachines(newMachines: Machine[]): { success: boolean; importedCount: number; errors: string[] } {
-    const errors: string[] = [];
-    let count = 0;
-
-    for (const raw of newMachines) {
-      if (!raw.assetCode || !raw.barcode) {
-        errors.push(`Baris diabaikan: Asset Code atau Barcode kosong (${raw.assetCode || 'tanpa kode'})`);
-        continue;
-      }
-
-      // Force text formats and preserve leading zeros
-      raw.barcode = String(raw.barcode).padStart(12, '0');
-      raw.assetCode = String(raw.assetCode).trim().toUpperCase();
-      raw.serial = String(raw.serial || '').trim();
-
-      // Normalization of location
-      if (!raw.locationId || raw.locationId.trim() === '') {
-        const site = raw.homeFactory?.includes('2') ? 'PW2' : raw.homeFactory?.includes('3') ? 'PW3' : 'PW1';
-        raw.locationId = `${site}-UNASSIGNED`;
-        raw.siteId = site;
-      } else if (raw.locationId === 'WH2') raw.locationId = 'WH2-UNASSIGNED';
-      else if (raw.locationId === 'SW') raw.locationId = 'SW-MAIN';
-      else if (raw.locationId === 'QA') raw.locationId = 'QA-MAIN';
-
-      if (!raw.siteId && raw.locationId.includes('-')) {
-        raw.siteId = raw.locationId.split('-')[0];
-      }
-
-      const existingIdx = this.machines.findIndex((m) => m.assetCode === raw.assetCode);
-      if (existingIdx >= 0) {
-        this.machines[existingIdx] = { ...this.machines[existingIdx], ...raw };
-      } else {
-        this.machines.push(raw);
-      }
-      count++;
-    }
-
-    this.rebuildIndices();
-    this.save();
-    return { success: true, importedCount: count, errors };
+  public batchImportMachines(_newMachines: Machine[]): { success: boolean; importedCount: number; errors: string[] } {
+    return { success: false, importedCount: 0, errors: [NOT_AVAILABLE] };
   }
 
-  /**
-   * Tarik data langsung dari Google Spreadsheet tab 'machine_asset' via Google Apps Script Backend
-   * Menggunakan helper tunggal postGasApi dengan token sesi aktif.
-   * TIDAK ADA fallback CSV/gviz ataupun penimpaan ke data contoh bila gagal.
-   */
-  public async syncFromGoogleSheet(
-    spreadsheetIdParam?: string,
-    sheetName: string = 'machine_asset'
-  ): Promise<{ success: boolean; message: string; count: number; source: string; details?: any }> {
-    const spreadsheetId = (spreadsheetIdParam || this.settings.spreadsheetId || '').trim();
-
-    try {
-      const resJson = await postGasApi<{
-        success: boolean;
-        machines?: any[];
-        sheetName?: string;
-        message?: string;
-      }>('GET_INITIAL_DATA', {
-        sheetName,
-        spreadsheetId,
-      });
-
-      if (resJson && resJson.success && Array.isArray(resJson.machines)) {
-        const mapped = this.mapRawObjectsToMachines(resJson.machines);
-        const merged = this.mergeWithLocalMutations(mapped);
-        this.machines = merged;
-        this.rebuildIndices();
-        this.save();
-        this.notifyListeners();
-        this.logAudit(
-          'System',
-          'GOOGLE_SHEET_SYNC',
-          `Berhasil sinkronisasi ${merged.length} mesin dari Google Apps Script (${resJson.sheetName || sheetName})`
-        );
-        return {
-          success: true,
-          message: `Berhasil menarik ${merged.length} data mesin dari Google Apps Script backend (${resJson.sheetName || sheetName})!`,
-          count: merged.length,
-          source: 'Google Apps Script Backend',
-        };
-      }
-
-      return {
-        success: false,
-        message: resJson?.message || 'Gagal menyinkronkan data dari Google Apps Script backend.',
-        count: 0,
-        source: 'Google Apps Script Backend',
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke Google Apps Script backend.',
-        count: 0,
-        source: 'Google Apps Script Backend',
-      };
-    }
-  }
-
-  /**
-   * Memetakan raw JSON object dari Apps Script ke Machine[]
-   */
-  private mapRawObjectsToMachines(rawList: any[]): Machine[] {
-    return rawList.map((raw, idx) => {
-      const assetCode = raw.assetCode || raw.AssetCode || raw.barcode12 || `AST-${idx + 1}`;
-      const barcode = String(raw.barcode || raw.barcode12 || raw.Barcode || assetCode).padStart(12, '0');
-      const serial = String(raw.serial || raw.serialNumber || raw.SerialNumber || raw.noSeri || '').trim();
-      const loc = raw.locationId || raw.LocationID || raw.lokasi || 'PW1-UNASSIGNED';
-      let site = raw.siteId || raw.SiteID || raw.pabrik || '';
-
-      if (!site && loc) {
-        if (loc.startsWith('PW1')) site = 'PW1';
-        else if (loc.startsWith('PW2')) site = 'PW2';
-        else if (loc.startsWith('PW3')) site = 'PW3';
-        else if (loc.startsWith('WH2')) site = 'WH2';
-        else if (loc.startsWith('SW')) site = 'SW';
-        else if (loc.startsWith('QA')) site = 'QA';
-        else site = 'PW1';
-      }
-
-      return {
-        assetCode,
-        barcode,
-        serial,
-        standardMachineName: raw.standardMachineName || raw.name || raw.MachineName || raw.item || 'Sewing Machine',
-        item: raw.item || raw.standardMachineName || 'Sewing Machine',
-        localName: String(raw.localName || '').trim() || undefined,
-        model: raw.model || raw.Model || '',
-        manufacturer: raw.manufacturer || raw.Maker || '',
-        locationId: loc,
-        siteId: site || 'PW1',
-        homeFactory: site || 'PW1',
-        status: raw.status || 'ACTIVE',
-        acqDate: raw.acqDate || '2024-01-01',
-        updatedAt: new Date().toISOString(),
-        updatedBy: 'GoogleAppsScript_Sync',
-      };
-    });
-  }
-
-  /**
-   * Menggabungkan data dari Google Sheet dengan mutasi status & lokasi lokal
-   * agar perubahan lokal (seperti status SOLD, pemindahan lokasi, transfer) tidak hilang tertimpa
-   */
-  private mergeWithLocalMutations(freshMachines: Machine[]): Machine[] {
-    const localMap = new Map<string, Machine>();
-    for (const m of this.machines) {
-      if (m.assetCode) {
-        localMap.set(m.assetCode.trim().toUpperCase(), m);
-      }
-    }
-
-    return freshMachines.map((sheetMachine) => {
-      const assetKey = (sheetMachine.assetCode || '').trim().toUpperCase();
-      const local = localMap.get(assetKey);
-      if (!local) return sheetMachine;
-
-      // Cek apakah mesin pernah dimutasi lokal atau diubah statusnya (misal SOLD, LOANED, IN_REPAIR, BROKEN)
-      const isLocallyModified =
-        local.status !== 'ACTIVE' ||
-        local.lastMovedAt ||
-        local.pendingTransferId ||
-        local.locationId === 'SOLD' ||
-        local.locationId.includes('SOLD');
-
-      if (isLocallyModified) {
-        return {
-          ...sheetMachine,
-          // Pertahankan status lokal jika di sheet masih default/kosong
-          status: sheetMachine.status !== 'ACTIVE' ? sheetMachine.status : (local.status || sheetMachine.status),
-          locationId: local.locationId || sheetMachine.locationId,
-          siteId: local.siteId || sheetMachine.siteId,
-          lastMovedAt: local.lastMovedAt || sheetMachine.lastMovedAt,
-          lastMovedBy: local.lastMovedBy || sheetMachine.lastMovedBy,
-          statusSince: local.statusSince || sheetMachine.statusSince,
-          loanTo: local.loanTo || sheetMachine.loanTo,
-          loanDueDate: local.loanDueDate || sheetMachine.loanDueDate,
-          pendingTransferId: local.pendingTransferId || sheetMachine.pendingTransferId,
-          updatedAt: local.updatedAt || sheetMachine.updatedAt,
-          updatedBy: local.updatedBy || sheetMachine.updatedBy,
-        };
-      }
-      return sheetMachine;
-    });
-  }
-
-  /**
-   * Mengirim mutasi / request langsung ke Google Apps Script Web App lewat helper tunggal postGasApi
-   */
-  public async postToGasBackend<T = any>(
-    actionOrPayload: string | { action: string; [key: string]: any; params?: any },
-    maybeParams?: any
-  ): Promise<T> {
-    if (typeof actionOrPayload === 'string') {
-      return await postGasApi<T>(actionOrPayload, maybeParams || {});
-    } else {
-      const { action, params, ...rest } = actionOrPayload;
-      return await postGasApi<T>(action, params || rest);
-    }
-  }
-
-  private logAudit(username: string, action: string, detail: string) {
-    this.auditLogs.unshift({
-      id: `AUD-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      username,
-      action,
-      detail,
-    });
+  /** Dulu menghapus data lokal. Sekarang hanya mengosongkan cache memori; data server tidak tersentuh. */
+  public clearAllData(_keepSettings: boolean = true): void {
+    this.clearLocalMachineCache();
   }
 }
 

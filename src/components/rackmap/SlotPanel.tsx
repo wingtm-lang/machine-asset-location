@@ -144,15 +144,10 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
     const rackMatch = loc.match(/^WH2-(R[1-6])-([A-C]\d+-S[1-3])/i);
     const targetLoc = `WH2-${rack.id}-${coord.level}${coord.column}-S${slotNumber}`;
 
-    if (rackMatch && loc.toUpperCase() !== targetLoc.toUpperCase()) {
-      const existingPos = `${rackMatch[1]}-${rackMatch[2]}`;
-      const confirmed = window.confirm(
-        `Mesin ini sudah di ${existingPos}. Pindahkan ke slot ini (${positionCode}-S${slotNumber})?`
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
+    // Catatan: dulu ada window.confirm() di sini bila mesin sudah berada di slot rak lain.
+    // Dihapus karena dialog native bisa diblokir di sebagian lingkungan dan membuat tombol
+    // gagal diam-diam tanpa pesan apa pun. Pemindahan antar slot tetap aman: tervalidasi
+    // di server (slot tujuan tidak boleh terisi) dan tercatat penuh di Riwayat Mesin.
 
     setLoadingActionSlot(slotNumber);
     setStatusMessage(null);
@@ -188,11 +183,8 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
 
   // Remove machine from slot (set to WH2-UNASSIGNED)
   const handleRemove = async (slotNumber: number, item: RackSlotItem) => {
-    const confirmed = window.confirm(
-      `Keluarkan mesin ${item.assetCode} dari slot ${slotNumber}? Lokasi dikembalikan ke WH2-UNASSIGNED.`
-    );
-    if (!confirmed) return;
-
+    // Tidak pakai window.confirm(): di beberapa lingkungan dialog native diblokir dan
+    // tombol ini gagal diam-diam tanpa pesan apa pun. Aksi ini aman (bisa di-undo).
     setLoadingActionSlot(slotNumber);
     setStatusMessage(null);
 

@@ -1,32 +1,36 @@
 /**
- * Authentication Context & Server-side Authorization Engine
- * Backend (Google Apps Script) adalah SATU-SATUNYA sumber kebenaran untuk login, sesi, dan hak akses.
+ * Konteks autentikasi.
+ * Antarmuka (useAuth) SAMA dengan versi lama agar view tidak perlu diubah.
+ * Sumber kebenaran login, sesi, dan hak akses: Supabase (Auth + view v_me).
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { User, SiteId } from '../types';
 import { storageService } from './storage';
-import {
-  gasAuthService,
-  getStoredToken,
-  getStoredUser,
-  clearSession,
-  registerAuthCallbacks,
-} from './gasAuthService';
+import { authService, AuthUser, registerAuthCallbacks } from './authService';
+
+type ActionName = 'MOVE' | 'CHANGE_STATUS' | 'TRANSFER' | 'OPNAME' | 'UNDO' | 'ADMIN' | 'REPORTS' | 'VIEW_DETAIL';
+type ToastType = 'error' | 'warning' | 'success';
+
+interface AuthToast {
+  type: ToastType;
+  text: string;
+  id: number;
+}
 
 interface AuthContextType {
   currentUser: User | null;
   token: string | null;
   isLoadingSession: boolean;
   language: 'id' | 'en';
-  authToast: { type: 'error' | 'warning' | 'success'; text: string; id: number } | null;
+  authToast: AuthToast | null;
   clearAuthToast: () => void;
   setLanguage: (lang: 'id' | 'en') => void;
   login: (username: string, passwordPlain: string) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   changePassword: (oldPasswordPlain: string, newPasswordPlain: string) => Promise<{ success: boolean; message: string }>;
   canAccessSite: (siteId: SiteId) => boolean;
-  canPerformAction: (action: 'MOVE' | 'CHANGE_STATUS' | 'TRANSFER' | 'OPNAME' | 'UNDO' | 'ADMIN' | 'REPORTS' | 'VIEW_DETAIL') => boolean;
+  canPerformAction: (action: ActionName) => boolean;
   canAddUser: boolean;
   canUseRackMap: boolean;
 }
@@ -50,18 +54,34 @@ const defaultAuthContext: AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function toUser(u: AuthUser): User {
+  return {
+    username: u.username,
+    displayName: u.displayName,
+    role: u.role,
+    siteAccess: u.siteAccess,
+    canAddUser: u.canAddUser,
+    canUseRackMap: u.canUseRackMap,
+    authority: u.role,
+    active: true,
+    failedAttempts: 0,
+  };
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(true);
   const [language, setLanguage] = useState<'id' | 'en'>('id');
-  const [authToast, setAuthToast] = useState<{
-    type: 'error' | 'warning' | 'success';
-    text: string;
-    id: number;
-  } | null>(null);
+  const [authToast, setAuthToast] = useState<AuthToast | null>(null);
 
-  const showAuthToast = useCallback((type: 'error' | 'warning' | 'success', text: string) => {
+  // Cermin currentUser agar callback event membaca nilai terkini tanpa menunggu render.
+  const currentUserRef = useRef<User | null>(null);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  const showAuthToast = useCallback((type: ToastType, text: string) => {
     setAuthToast({ type, text, id: Date.now() });
   }, []);
 
@@ -69,162 +89,106 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthToast(null);
   }, []);
 
-  // Daftarkan listener global UNAUTHORIZED dan FORBIDDEN
+  const handleSessionLost = useCallback(() => {
+    storageService.clearLocalMachineCache();
+    currentUserRef.current = null;
+    setCurrentUser(null);
+    setToken(null);
+    showAuthToast('error', 'Sesi berakhir, silakan login kembali');
+  }, [showAuthToast]);
+
+  // Callback global: UNAUTHORIZED dari lapisan data, dan FORBIDDEN dari fungsi server
   useEffect(() => {
     registerAuthCallbacks(
       () => {
-        // UNAUTHORIZED: Hapus sesi, bersihkan cache mesin lokal, kembali ke login
-        storageService.clearLocalMachineCache();
-        setCurrentUser(null);
-        setToken(null);
-        clearSession();
-        showAuthToast('error', 'Sesi berakhir, silakan login kembali');
+        if (currentUserRef.current) handleSessionLost();
       },
       (msg: string) => {
-        // FORBIDDEN: Tampilkan pesan dari server
         showAuthToast('warning', msg || 'Akses ditolak (FORBIDDEN)');
       }
     );
-  }, [showAuthToast]);
+  }, [handleSessionLost, showAuthToast]);
 
-  // Cek sesi otomatis saat aplikasi dibuka (ME action)
+  // Sesi berakhir/dicabut di sisi server (token tidak bisa diperbarui, dll).
+  // Diabaikan bila tidak ada pengguna login (mis. setelah logout manual atau login gagal).
   useEffect(() => {
+    return authService.onSignedOut(() => {
+      if (currentUserRef.current) handleSessionLost();
+    });
+  }, [handleSessionLost]);
+
+  // Pulihkan sesi saat aplikasi dibuka, dan verifikasi ke server
+  useEffect(() => {
+    let cancelled = false;
     const verifyInitialSession = async () => {
       setIsLoadingSession(true);
-      const existingToken = getStoredToken();
-      const existingUser = getStoredUser();
-
-      if (existingToken && existingUser) {
-        // Set state sementara dari sessionStorage agar tidak berkedip saat verifikasi
-        setToken(existingToken);
-        setCurrentUser({
-          username: existingUser.username,
-          displayName: existingUser.displayName,
-          role: existingUser.role,
-          siteAccess: existingUser.siteAccess || [],
-          canAddUser: existingUser.canAddUser,
-          canUseRackMap: existingUser.canUseRackMap,
-          authority: existingUser.role,
-          active: true,
-          failedAttempts: 0,
-        });
-
-        // Verifikasi ke server GAS (ME)
-        try {
-          const res = await gasAuthService.checkMe();
-          if (res.success && res.user) {
-            setToken(existingToken);
-            setCurrentUser({
-              username: res.user.username,
-              displayName: res.user.displayName,
-              role: res.user.role,
-              siteAccess: res.user.siteAccess || [],
-              canAddUser: res.user.canAddUser,
-              canUseRackMap: res.user.canUseRackMap,
-              authority: res.user.role,
-              active: true,
-              failedAttempts: 0,
-            });
-          } else {
-            setCurrentUser(null);
-            setToken(null);
-            clearSession();
-          }
-        } catch {
-          setCurrentUser(null);
-          setToken(null);
-          clearSession();
-        }
+      const res = await authService.restore();
+      if (cancelled) return;
+      if (res === 'OFFLINE') {
+        setCurrentUser(null);
+        setToken(null);
+        showAuthToast('warning', 'Tidak dapat memverifikasi sesi karena jaringan. Muat ulang halaman setelah tersambung.');
+      } else if (res) {
+        setCurrentUser(toUser(res));
+        setToken(await authService.getAccessToken());
       } else {
         setCurrentUser(null);
         setToken(null);
-        clearSession();
       }
-      setIsLoadingSession(false);
+      if (!cancelled) setIsLoadingSession(false);
     };
-
     verifyInitialSession();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [showAuthToast]);
 
   const login = async (username: string, passwordPlain: string): Promise<{ success: boolean; message: string }> => {
-    const res = await gasAuthService.login(username, passwordPlain);
-    if (res.success && res.user && res.token) {
-      const u: User = {
-        username: res.user.username,
-        displayName: res.user.displayName,
-        role: res.user.role,
-        siteAccess: res.user.siteAccess || [],
-        canAddUser: res.user.canAddUser,
-        canUseRackMap: res.user.canUseRackMap,
-        authority: res.user.role,
-        active: true,
-        failedAttempts: 0,
-      };
-      setCurrentUser(u);
+    const res = await authService.login(username, passwordPlain);
+    if (res.success && res.user) {
+      setCurrentUser(toUser(res.user));
       setToken(res.token);
-      return { success: true, message: res.message || 'Login berhasil' };
+      return { success: true, message: res.message };
     }
-    return { success: false, message: res.message || 'NIK atau password salah' };
+    return { success: false, message: res.message };
   };
 
   const logout = () => {
-    gasAuthService.logout();
+    // Tandai dulu agar event SIGNED_OUT tidak dianggap sesi berakhir
+    currentUserRef.current = null;
     storageService.clearLocalMachineCache();
     setCurrentUser(null);
     setToken(null);
+    void authService.logout();
   };
 
-  const changePassword = async (oldPasswordPlain: string, newPasswordPlain: string): Promise<{ success: boolean; message: string }> => {
-    return await gasAuthService.changePassword(oldPasswordPlain, newPasswordPlain);
+  const changePassword = async (
+    oldPasswordPlain: string,
+    newPasswordPlain: string
+  ): Promise<{ success: boolean; message: string }> => {
+    return await authService.changePassword(oldPasswordPlain, newPasswordPlain);
   };
 
-  // Normalisasi role server: "ADMIN_MASTER" | "ALL_SITES" | "FACTORY" / custom
-  const roleKey = String(currentUser?.role || '').toLowerCase().replace(/[\s_-]/g, '');
-  const isAdminMaster = roleKey === 'adminmaster' || roleKey === 'admin';
-  const isAllSites = roleKey === 'allsites' || roleKey === 'all';
+  // Hak akses: murni dari data server (view v_me)
+  const isAdminMaster = currentUser?.role === 'ADMIN_MASTER';
+  const isAllSites = currentUser?.role === 'ALL_SITES';
 
-  // Hak akses murni bersumber dari data server (currentUser)
-  const canAddUser = Boolean(
-    currentUser?.canAddUser ||
-    isAdminMaster
-  );
-
-  const canUseRackMap = Boolean(
-    currentUser?.canUseRackMap ||
-    (currentUser?.siteAccess && (currentUser.siteAccess.includes('WH2') || currentUser.siteAccess.includes('ALL'))) ||
-    isAdminMaster ||
-    isAllSites
-  );
+  const canAddUser = Boolean(currentUser?.canAddUser);
+  const canUseRackMap = Boolean(currentUser?.canUseRackMap);
 
   const canAccessSite = (siteId: SiteId): boolean => {
     if (!currentUser) return false;
-    const rKey = String(currentUser.role || '').toLowerCase().replace(/[\s_-]/g, '');
-    const isAdm = rKey === 'adminmaster' || rKey === 'admin';
-    const isAll = rKey === 'allsites' || rKey === 'all';
-
-    // Utamakan currentUser.siteAccess dari server
-    if (currentUser.siteAccess && currentUser.siteAccess.includes('ALL')) {
-      return true;
-    }
-    if (isAdm || isAll) {
-      return true;
-    }
-    return currentUser.siteAccess ? currentUser.siteAccess.includes(siteId) : false;
+    return currentUser.siteAccess.includes(siteId);
   };
 
-  const canPerformAction = (
-    action: 'MOVE' | 'CHANGE_STATUS' | 'TRANSFER' | 'OPNAME' | 'UNDO' | 'ADMIN' | 'REPORTS' | 'VIEW_DETAIL'
-  ): boolean => {
+  // Tampilan menu saja. Penegakan sesungguhnya ada di database (RLS + fungsi server).
+  const canPerformAction = (action: ActionName): boolean => {
     if (!currentUser) return false;
-    const rKey = String(currentUser.role || '').toLowerCase().replace(/[\s_-]/g, '');
-    const isAdm = rKey === 'adminmaster' || rKey === 'admin';
-    const isAll = rKey === 'allsites' || rKey === 'all';
-
     switch (action) {
       case 'ADMIN':
-        return isAdm;
+        return isAdminMaster;
       case 'REPORTS':
-        return isAdm || isAll;
+        return isAdminMaster || isAllSites;
       case 'MOVE':
       case 'TRANSFER':
       case 'OPNAME':

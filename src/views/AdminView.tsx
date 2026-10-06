@@ -145,13 +145,23 @@ export const AdminView: React.FC = () => {
   const handleRunDataAudit = () => {
     const res = storageService.runDataAuditAndFix();
     setAuditResult(res);
-    setNotification('Audit dan perbaikan data Bagian C berhasil dieksekusi ke seluruh database mesin!');
+    const totalFixed = Object.values(res).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
+    if (totalFixed > 0) {
+      setNotification('Audit dan perbaikan data Bagian C berhasil dieksekusi ke seluruh database mesin!');
+    } else {
+      setNotification(
+        'Audit otomatis di aplikasi belum tersedia di versi Supabase (constraint database sudah mencegah data rusak). Tidak ada yang diperbaiki.'
+      );
+    }
   };
 
   // Add Site
   const handleAddSite = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSiteId.trim() || !newSiteName.trim()) return;
+    if (!newSiteId.trim() || !newSiteName.trim()) {
+      setNotification('Isi dulu Kode Site dan Nama Site sebelum menyimpan.');
+      return;
+    }
 
     const res = storageService.addSite({
       siteId: newSiteId.trim().toUpperCase(),
@@ -160,21 +170,17 @@ export const AdminView: React.FC = () => {
       active: true,
     });
 
+    setNotification(res.message);
     if (res.success) {
-      setNotification(res.message);
       setNewSiteId('');
       setNewSiteName('');
-    } else {
-      alert(res.message);
     }
   };
 
   // Update Rack Columns
   const handleUpdateRack = (rackNo: number, cols: number) => {
     const res = storageService.updateRackConfig(rackNo, cols);
-    if (res.success) {
-      setNotification(res.message);
-    }
+    setNotification(res.message);
   };
 
   // Add User
@@ -198,8 +204,8 @@ export const AdminView: React.FC = () => {
       mustChangePassword: true,
     });
 
+    setNotification(res.message);
     if (res.success) {
-      setNotification(res.message);
       setNewUsername('');
       setNewDisplayName('');
     }
@@ -715,9 +721,12 @@ export const AdminView: React.FC = () => {
                         const wsname = wb.SheetNames[0];
                         const ws = wb.Sheets[wsname];
                         const data = XLSX.utils.sheet_to_json(ws);
-                        alert(`Berhasil membaca ${data.length} baris data dari file ${file.name}!`);
+                        setNotification(
+                          `File ${file.name} terbaca (${data.length} baris), tapi impor batch belum tersedia di versi Supabase. ` +
+                            'Data belum tersimpan ke database. Gunakan SQL Editor Supabase untuk impor massal.'
+                        );
                       } catch {
-                        alert('Gagal memproses file Excel.');
+                        setNotification(`Gagal membaca file ${file.name}. Pastikan formatnya .xlsx, .xls, atau .csv yang valid.`);
                       }
                     };
                     reader.readAsBinaryString(file);

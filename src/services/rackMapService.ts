@@ -1,10 +1,21 @@
 /**
- * Service pemanggil Google Apps Script (GAS) Web App untuk Mapping Rak Gudang WH2
- * Format Lokasi: WH2-{RAK}-{TINGKAT}{KOLOM}-S{SLOT}
- * Contoh: WH2-R4-B12-S2 (Rak R4, Tingkat B, Kolom 12, Slot 2)
+ * Service Mapping Rak Gudang WH2.
+ * Format Lokasi: WH2-{RAK}-{TINGKAT}{KOLOM}-S{SLOT}, contoh WH2-R4-B12-S2.
+ *
+ * DIGANTI dari pemanggilan postGasApi langsung menjadi storageService (Supabase):
+ *   - getRackMap        -> view public.v_rack_slots (langkah 5-1)
+ *   - searchMachine      -> cache lokal yang sudah disinkronkan (storageService.getMachineByCode)
+ *   - assignRackSlot     -> storageService.moveMachine (fungsi move_machine, langkah 5-1)
+ *   - removeMachineFromRack / undoMove -> storageService.moveMachine / undoLastMove
+ *
+ * Nama dan bentuk setiap metode publik di objek rackMapService DIPERTAHANKAN SAMA
+ * dengan versi lama, sehingga RackMapView.tsx dan SlotPanel.tsx tidak perlu diubah.
+ *
+ * "issues" (dulu: slot duplikat/format salah) selalu kosong di sini. Ini BUKAN
+ * disembunyikan: constraint database (unique index per slot) membuat duplikat slot
+ * mustahil terjadi, jadi tidak ada lagi yang perlu dilaporkan di titik ini.
  */
 
-import { postGasApi } from './gasAuthService';
 import { storageService } from './storage';
 import {
   WH2RackId,
@@ -22,7 +33,6 @@ import {
   formatRackDisplay,
 } from '../types/wh2Rack';
 
-// Re-export all WH2 rack types and constants so existing imports work seamlessly
 export {
   WH2_RACKS,
   RACK_LEVELS,
@@ -41,110 +51,65 @@ export type {
   SelectedColumnCoord,
 };
 
-export const callGasApi = postGasApi;
-
 export const rackMapService = {
-  /**
-   * GET_RACK_MAP
-   * Mengambil data slot rak WH2 dari server GAS beserta issues/data bermasalah.
-   * Tidak ada fallback lokal; bila server gagal, kembalikan error.
-   */
+  /** Diambil langsung dari cache mesin yang sudah disinkronkan (tidak perlu round-trip server terpisah). */
   async getRackMap(): Promise<{
     success: boolean;
     slots: RackSlotItem[];
     issues: RackIssue[];
     message?: string;
   }> {
-    try {
-      const res = await postGasApi<{
-        success: boolean;
-        slots?: RackSlotItem[];
-        issues?: RackIssue[];
-        message?: string;
-      }>('GET_RACK_MAP', {});
-
-      if (res && res.success && Array.isArray(res.slots)) {
-        return {
-          success: true,
-          slots: res.slots,
-          issues: Array.isArray(res.issues) ? res.issues : [],
-        };
-      }
-      return {
-        success: false,
-        slots: [],
-        issues: [],
-        message: res?.message || 'Gagal memuat mapping rak WH2 dari server.',
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        slots: [],
-        issues: [],
-        message: err.message || 'Tidak dapat terhubung ke server untuk memuat rak WH2.',
-      };
+    const slots: RackSlotItem[] = [];
+    for (const m of storageService.getAllMachines()) {
+      const p = parseSlotLocationId(m.locationId);
+      if (!p) continue;
+      slots.push({
+        assetCode: m.assetCode,
+        barcode: m.barcode,
+        serial: m.serial,
+        name: m.standardMachineName,
+        localName: m.localName,
+        site: 'WH2',
+        rak: p.rak,
+        tingkat: p.tingkat,
+        kolom: p.kolom,
+        slot: p.slot,
+        model: m.model,
+        manufacturer: m.manufacturer,
+        status: m.status,
+      });
     }
+    return { success: true, slots, issues: [] };
   },
 
-  /**
-   * SEARCH_MACHINE params: { query } (query = kode aset / barcode / serial)
-   */
+  /** query = kode aset / barcode / serial. Dicari di cache lokal (sudah tersinkron dari server). */
   async searchMachine(query: string): Promise<{ success: boolean; machine?: MachineSearchResult; message?: string }> {
     const cleanQuery = (query || '').trim();
     if (!cleanQuery) {
       return { success: false, message: 'Masukkan kode aset, barcode, atau nomor seri.' };
     }
-
-    try {
-      const res = await postGasApi<{ success: boolean; machine?: MachineSearchResult; message?: string }>(
-        'SEARCH_MACHINE',
-        { query: cleanQuery }
-      );
-      if (res && res.success && res.machine) {
-        return { success: true, machine: res.machine };
-      }
-      return {
-        success: false,
-        message: res?.message || `Mesin dengan kata kunci "${cleanQuery}" tidak ditemukan di server.`,
-      };
-    } catch {
-      // Fallback pencarian lokal jika jaringan tidak tersedia
-      const machines = storageService.getAllMachines();
-      const qUpper = cleanQuery.toUpperCase();
-
-      const found = machines.find(
-        (m) =>
-          (m.assetCode && m.assetCode.toUpperCase() === qUpper) ||
-          (m.barcode && m.barcode === cleanQuery) ||
-          (m.serial && m.serial.toUpperCase() === qUpper)
-      );
-
-      if (found) {
-        return {
-          success: true,
-          machine: {
-            assetCode: found.assetCode,
-            barcode: found.barcode,
-            serial: found.serial,
-            standardMachineName: found.standardMachineName || found.item,
-            localName: found.localName,
-            manufacturer: found.manufacturer,
-            model: found.model,
-            locationId: found.locationId,
-            siteId: found.siteId,
-            status: found.status,
-          },
-        };
-      }
-
+    const { machine } = storageService.getMachineByCode(cleanQuery);
+    if (!machine) {
       return { success: false, message: `Mesin dengan kata kunci "${cleanQuery}" tidak ditemukan.` };
     }
+    return {
+      success: true,
+      machine: {
+        assetCode: machine.assetCode,
+        barcode: machine.barcode,
+        serial: machine.serial,
+        standardMachineName: machine.standardMachineName || machine.item,
+        localName: machine.localName,
+        manufacturer: machine.manufacturer,
+        model: machine.model,
+        locationId: machine.locationId,
+        siteId: machine.siteId,
+        status: machine.status,
+      },
+    };
   },
 
-  /**
-   * ASSIGN_RACK_SLOT params: { assetCode, siteId:"WH2", rak, tingkat, kolom, slot }
-   * Hanya mengandalkan server GAS (tidak menulis cache lokal direct mutation).
-   */
+  /** Menempatkan mesin ke satu slot rak lewat fungsi pindah biasa (move_machine menolak slot yang sudah terisi). */
   async assignRackSlot(params: {
     assetCode: string;
     siteId?: string;
@@ -155,102 +120,41 @@ export const rackMapService = {
     byUser?: string;
   }): Promise<{ success: boolean; message: string }> {
     const { assetCode, rak, tingkat, kolom, slot } = params;
-    const siteId = params.siteId || 'WH2';
     const newLocationId = formatSlotLocationId(rak, tingkat, kolom, slot);
 
-    try {
-      const res = await postGasApi<{ success: boolean; message: string }>('ASSIGN_RACK_SLOT', {
-        assetCode,
-        siteId,
-        rak,
-        tingkat,
-        kolom,
-        slot,
-        byUser: params.byUser,
-      });
+    const res = await storageService.moveMachine({
+      assetCode,
+      targetLocationId: newLocationId,
+      username: params.byUser || 'User',
+      userSiteAccess: ['WH2'],
+      reason: `Penempatan di rak ${newLocationId}`,
+    });
 
-      if (res && res.success) {
-        return {
-          success: true,
-          message: res.message || `Mesin ${assetCode} berhasil ditempatkan di posisi ${newLocationId}.`,
-        };
-      }
-
-      return {
-        success: false,
-        message: res?.message || 'Gagal menempatkan mesin di slot rak server.',
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server. Coba lagi.',
-      };
-    }
+    return res.success
+      ? { success: true, message: res.message || `Mesin ${assetCode} berhasil ditempatkan di posisi ${newLocationId}.` }
+      : { success: false, message: res.message };
   },
 
-  /**
-   * MOVE_MACHINE params: { assetCode, barcode, locationId:"WH2-UNASSIGNED", siteId:"WH2", status, reason }
-   * Mengosongkan slot (mengembalikan mesin ke WH2-UNASSIGNED)
-   */
+  /** Mengosongkan slot (mengembalikan mesin ke WH2-UNASSIGNED). Status TIDAK dikirim: biarkan server menjaga status mesin apa adanya. */
   async removeMachineFromRack(assetCode: string, byUser: string): Promise<{ success: boolean; message: string }> {
-    const machine = storageService.getAllMachines().find((m) => m.assetCode.toUpperCase() === assetCode.toUpperCase());
+    const res = await storageService.moveMachine({
+      assetCode,
+      targetLocationId: 'WH2-UNASSIGNED',
+      username: byUser,
+      userSiteAccess: ['WH2'],
+      reason: 'Dikeluarkan dari rak',
+    });
 
-    try {
-      const res = await postGasApi<{ success: boolean; message: string }>('MOVE_MACHINE', {
-        assetCode,
-        barcode: machine?.barcode || assetCode,
-        locationId: 'WH2-UNASSIGNED',
-        siteId: 'WH2',
-        status: machine?.status || 'ACTIVE',
-        reason: 'Dikeluarkan dari rak',
-        byUser,
-      });
-
-      if (res && res.success) {
-        return {
-          success: true,
-          message: res.message || `Mesin ${assetCode} berhasil dikeluarkan dari rak.`,
-        };
-      }
-
-      return {
-        success: false,
-        message: res?.message || 'Gagal mengeluarkan mesin dari rak server.',
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server. Coba lagi.',
-      };
-    }
+    return res.success
+      ? { success: true, message: res.message || `Mesin ${assetCode} berhasil dikeluarkan dari rak.` }
+      : { success: false, message: res.message };
   },
 
-  /**
-   * UNDO_MOVE params: { assetCode }
-   */
+  /** Membatalkan pemindahan TERAKHIR pada mesin ini (lewat fungsi undo_move di server; sama seperti dipakai menu Riwayat). */
   async undoMove(assetCode: string, byUser: string): Promise<{ success: boolean; message: string }> {
-    try {
-      const res = await postGasApi<{ success: boolean; message: string }>('UNDO_MOVE', {
-        assetCode,
-        byUser,
-      });
-
-      if (res && res.success) {
-        return {
-          success: true,
-          message: res.message || `Penempatan mesin ${assetCode} berhasil dibatalkan.`,
-        };
-      }
-
-      return {
-        success: false,
-        message: res?.message || 'Gagal membatalkan pemindahan di server.',
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err.message || 'Tidak dapat terhubung ke server. Coba lagi.',
-      };
-    }
+    const res = await storageService.undoLastMove({ assetCode, username: byUser, isAdmin: false });
+    return res.success
+      ? { success: true, message: res.message || `Penempatan mesin ${assetCode} berhasil dibatalkan.` }
+      : { success: false, message: res.message };
   },
 };

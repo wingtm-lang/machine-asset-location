@@ -35,7 +35,7 @@ import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
-import { postGasApi } from '../services/gasAuthService';
+
 import { Location, Machine, OpnameItem, OpnameResult, SiteId } from '../types';
 import { getMachineLabel } from '../utils/machineName';
 
@@ -190,11 +190,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     setIsLoadingSessions(true);
     setSessionsFetchError(null);
     try {
-      const res = await postGasApi<{
-        success: boolean;
-        sessions?: ServerOpnameSession[];
-        message?: string;
-      }>('LIST_OPNAME_SESSIONS', {});
+      const res = await storageService.listOpnameSessions();
 
       if (res && res.success && Array.isArray(res.sessions)) {
         setServerSessions(res.sessions);
@@ -239,11 +235,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     const allowedSitesPayload = Array.from(new Set([selectedSiteId, ...formAllowedSites]));
 
     try {
-      const res = await postGasApi<{
-        success: boolean;
-        message?: string;
-        session?: ServerOpnameSession;
-      }>('START_OPNAME_SESSION', {
+      const res = await storageService.startOpnameSession({
         siteId: selectedSiteId,
         locationId: selectedLocationId || undefined,
         allowedSites: allowedSitesPayload,
@@ -294,11 +286,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     const guaranteedSites = Array.from(new Set([editingSession.siteId, ...modalAllowedSites]));
 
     try {
-      const res = await postGasApi<{
-        success: boolean;
-        message?: string;
-        session?: ServerOpnameSession;
-      }>('UPDATE_OPNAME_ACCESS', {
+      const res = await storageService.updateOpnameAccess({
         sessionId: editingSession.sessionId,
         allowedSites: guaranteedSites,
         lockMoves: modalLockMoves,
@@ -445,29 +433,19 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     if (!activeSession || isFinishingSession) return;
 
     setIsFinishingSession(true);
-    const nowIso = new Date().toISOString();
-
-    const finishedSession: ServerOpnameSession = {
-      ...activeSession,
-      status,
-      finishedAt: nowIso,
-      endedAt: nowIso,
-    };
+    // finishedAt/endedAt sekarang ditentukan oleh server (kolom ended_at), tidak perlu dihitung di sini.
 
     try {
-      const res = await postGasApi<{
-        success: boolean;
-        message?: string;
-      }>('SAVE_OPNAME', {
-        session: finishedSession,
-        items: scannedItems.map((it) => ({
+      const res = await storageService.closeOpnameSession(
+        { sessionId: activeSession.sessionId, status },
+        scannedItems.map((it) => ({
           assetCode: it.assetCode,
           barcode: it.barcode,
           result: it.result,
           scannedLocationId: it.currentActualLocation,
           expectedLocationId: it.registeredLocation,
-        })),
-      });
+        }))
+      );
 
       if (res && res.success) {
         soundService.playSuccess();
@@ -1058,9 +1036,9 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 <button
                   type="button"
                   onClick={() => {
-                    if (window.confirm('Batalkan sesi ini di server?')) {
-                      handleCloseSession('CANCELLED');
-                    }
+                    // Tidak pakai window.confirm(): bisa diblokir di sebagian lingkungan dan
+                    // membuat tombol ini gagal diam-diam tanpa pesan apa pun.
+                    handleCloseSession('CANCELLED');
                   }}
                   disabled={isFinishingSession}
                   className="px-3 py-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 flex items-center gap-1"
