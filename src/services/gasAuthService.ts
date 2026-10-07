@@ -57,9 +57,6 @@ export interface GetMovementsResponse {
   message?: string;
 }
 
-const NOT_AVAILABLE_ADD = 'Menambah pengguna belum tersedia dari aplikasi. Buat akun lewat Supabase: Authentication > Users > Add user, lalu daftarkan di sini melalui admin.';
-const NOT_AVAILABLE_RESET = 'Reset password belum tersedia dari aplikasi. Lewat Supabase: Authentication > Users > pilih akun > Reset password.';
-
 function errMessage(e: unknown): string {
   const err = (e ?? {}) as { message?: string };
   const msg = String(err.message ?? '');
@@ -122,12 +119,34 @@ export const gasAuthService = {
     return { success: true, users };
   },
 
-  async addUser(_params: { nik: string; password: string; profile: string; authority: string }): Promise<{ success: boolean; message: string }> {
-    return { success: false, message: NOT_AVAILABLE_ADD };
+  async addUser(params: { nik: string; password: string; profile: string; authority: string }): Promise<{ success: boolean; message: string }> {
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        body: { action: 'ADD_USER', ...params },
+      });
+      if (error) return { success: false, message: errMessage(error) };
+      const r = (data ?? {}) as { success?: boolean; message?: string };
+      return r.success
+        ? { success: true, message: r.message || `User ${params.nik} berhasil ditambahkan.` }
+        : { success: false, message: r.message || 'Gagal menambahkan pengguna.' };
+    } catch (e) {
+      return { success: false, message: errMessage(e) };
+    }
   },
 
-  async resetPassword(_params: { nik: string; newPassword: string }): Promise<{ success: boolean; message: string }> {
-    return { success: false, message: NOT_AVAILABLE_RESET };
+  async resetPassword(params: { nik: string; newPassword: string }): Promise<{ success: boolean; message: string }> {
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        body: { action: 'RESET_PASSWORD', ...params },
+      });
+      if (error) return { success: false, message: errMessage(error) };
+      const r = (data ?? {}) as { success?: boolean; message?: string };
+      return r.success
+        ? { success: true, message: r.message || `Password pengguna ${params.nik} berhasil direset.` }
+        : { success: false, message: r.message || 'Gagal mereset password.' };
+    } catch (e) {
+      return { success: false, message: errMessage(e) };
+    }
   },
 
   async updateUser(params: { nik: string; profile?: string; authority?: string; active?: boolean }): Promise<{ success: boolean; message: string }> {
@@ -158,14 +177,16 @@ export const gasAuthService = {
       const limit = Math.min(Math.max(1, params.limit ?? 200), 1000);
       let q = supabase
         .from('movements')
-        .select('id, asset_code, barcode, serial, machine_name, from_location, to_location, from_site_id, to_site_id, status_after, reason, moved_by_nik, moved_at, notes, movement_type, undoes_movement_id')
+        .select(
+          'id, asset_code, barcode, serial, machine_name, from_location, to_location, from_site_id, to_site_id, status_after, reason, moved_by_nik, moved_at, notes, movement_type, undoes_movement_id'
+        )
         .order('id', { ascending: false })
         .limit(limit + 1);
       if (params.assetCode) q = q.eq('asset_code', params.assetCode.trim().toUpperCase());
       if (params.from) q = q.order('moved_at', { ascending: false });
       const { data, error } = await q;
       if (error) return { success: false, hasMore: false, movements: [], message: errMessage(error) };
-      const rows = (data ?? []) as any[];
+      const rows = data ?? [];
       const hasMore = rows.length > limit;
       const page = rows.slice(0, limit);
       return {
@@ -208,9 +229,4 @@ export const gasAuthService = {
 /** Dulu membaca VITE_GAS_URL. Sekarang: tidak ada satu "base URL" tunggal untuk ditampilkan; pakai status ping. */
 export function getGasBaseUrl(): string {
   return (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || '';
-}
-
-/** Fungsi kompatibilitas untuk pemanggil lama sebelum migrasi penuh ke fungsi server Supabase */
-export async function postGasApi<T = any>(_action: string, _params?: any): Promise<T> {
-  return { success: false, message: 'Fitur ini belum dialihkan ke Supabase.' } as T;
 }

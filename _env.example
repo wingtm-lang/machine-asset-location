@@ -1,5 +1,0 @@
-# Salin file ini menjadi .env (JANGAN di-commit). Isi dari Supabase:
-# Project Settings > API Keys
-VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
-# Publishable key (sb_publishable_...) atau anon key lama. BUKAN secret / service_role.
-VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
