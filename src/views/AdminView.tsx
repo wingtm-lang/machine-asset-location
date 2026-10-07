@@ -23,15 +23,13 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
-import { generateGasCodeGs } from '../services/gasExporter';
-import { gasAuthService, getGasBaseUrl } from '../services/gasAuthService';
 import { Site, Location, Rack, User, UserRole, AppSettings } from '../types';
 
 export const AdminView: React.FC = () => {
   const { currentUser, language } = useAuth();
 
   const [activeSection, setActiveSection] = useState<
-    'cleaning' | 'sites' | 'racks' | 'users' | 'gas_export' | 'import_export'
+    'cleaning' | 'sites' | 'racks' | 'users' | 'import_export'
   >('cleaning');
 
   // Bagian C Audit results
@@ -60,84 +58,13 @@ export const AdminView: React.FC = () => {
   const users = storageService.getUsers();
   const settings = storageService.getSettings();
 
-  const [spreadsheetId, setSpreadsheetId] = useState(
-    settings.spreadsheetId || '1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio'
-  );
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'SUCCESS' | 'ERROR'>('IDLE');
-  const [connectionMsg, setConnectionMsg] = useState('');
-
-  const [copiedGas, setCopiedGas] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
-
-  // Live Sheet Sync State
-  const [targetSheetName, setTargetSheetName] = useState('machine_asset');
-  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<{
-    success: boolean;
-    message: string;
-    count?: number;
-    source?: string;
-  } | null>(null);
-
-  // Sync Data Directly from Sheet (machine_asset)
-  const handleSyncDataFromSheet = async () => {
-    setIsSyncingSheet(true);
-    setSyncFeedback(null);
-    try {
-      const res = await storageService.syncFromGoogleSheet(spreadsheetId, targetSheetName);
-      setSyncFeedback(res);
-      if (res.success) {
-        setNotification(`Sinkronisasi berhasil! ${res.count} data mesin dimuat dari "${targetSheetName}".`);
-      }
-    } catch (e: any) {
-      setSyncFeedback({
-        success: false,
-        message: 'Terjadi kendala saat menghubungkan ke Google Spreadsheet: ' + e.message,
-      });
-    } finally {
-      setIsSyncingSheet(false);
-    }
-  };
 
   // Clear Database & Dummy Records
   const handleClearDatabase = () => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus seluruh data mesin dummy / lokal? Database akan dikosongkan untuk kemudian ditarik dari Google Spreadsheet.')) {
+    if (window.confirm('Apakah Anda yakin ingin mengosongkan cache mesin? Data di server Supabase tetap aman.')) {
       storageService.clearAllData(true);
-      setNotification('Seluruh data mesin lokal / dummy telah berhasil dihapus. Database sekarang bersih (0 mesin).');
-    }
-  };
-
-  // Test GAS Web App Connection via PING & Save Spreadsheet ID
-  const handleTestGasConnection = async () => {
-    setTestingConnection(true);
-    setConnectionStatus('IDLE');
-    setConnectionMsg('Menguji konektivitas server Google Apps Script (PING)...');
-
-    try {
-      // Save spreadsheet ID to local settings
-      storageService.updateSettings({
-        ...settings,
-        spreadsheetId: spreadsheetId.trim(),
-      });
-
-      const res = await gasAuthService.ping();
-      if (res && res.success) {
-        setConnectionStatus('SUCCESS');
-        setConnectionMsg(
-          `Koneksi Berhasil! Version: ${res.version || 'v1.0'}${
-            res.timestamp ? ` (Waktu Server: ${res.timestamp})` : ''
-          }`
-        );
-      } else {
-        setConnectionStatus('ERROR');
-        setConnectionMsg(res?.message || 'Server Google Apps Script tidak merespons PING.');
-      }
-    } catch (err: any) {
-      setConnectionStatus('ERROR');
-      setConnectionMsg(`Gagal terhubung ke server: ${err.message || 'Error jaringan'}`);
-    } finally {
-      setTestingConnection(false);
+      setNotification('Cache data mesin lokal telah dibersihkan.');
     }
   };
 
@@ -217,14 +144,6 @@ export const AdminView: React.FC = () => {
     setNotification(res.message);
   };
 
-  // Copy Google Apps Script Code
-  const handleCopyGas = () => {
-    const code = generateGasCodeGs(spreadsheetId);
-    navigator.clipboard.writeText(code);
-    setCopiedGas(true);
-    setTimeout(() => setCopiedGas(false), 2000);
-  };
-
   // Export Full DB
   const handleExportFullDb = () => {
     const machines = storageService.getAllMachines();
@@ -247,7 +166,7 @@ export const AdminView: React.FC = () => {
           </h1>
         </div>
         <p className="text-xs text-slate-500">
-          Kelola master data site, line pabrik, rak WH2, pengguna & hak akses RBAC, audit data Bagian C, dan generator Apps Script.
+          Kelola master data site, line pabrik, rak WH2, pengguna & hak akses RBAC, dan audit data Bagian C.
         </p>
       </div>
 
@@ -301,16 +220,6 @@ export const AdminView: React.FC = () => {
         >
           <FileSpreadsheet className="w-3.5 h-3.5 inline mr-1.5" />
           <span>Impor / Ekspor Excel</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSection('gas_export')}
-          className={`py-2 px-3.5 rounded-xl whitespace-nowrap transition-all ${
-            activeSection === 'gas_export' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-          }`}
-        >
-          <Code className="w-3.5 h-3.5 inline mr-1.5" />
-          <span>Google Apps Script</span>
         </button>
       </div>
 
@@ -735,198 +644,6 @@ export const AdminView: React.FC = () => {
                 className="block w-full text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500"
               />
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 6: GOOGLE SPREADSHEET & APPS SCRIPT BACKEND */}
-      {activeSection === 'gas_export' && (
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
-          {/* Spreadsheet ID & Live Web App Connection Box */}
-          <div className="p-5 rounded-2xl bg-slate-50 border border-indigo-200/80 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                <span>Koneksi Google Spreadsheet & Apps Script Backend</span>
-              </div>
-              <span className="text-[10px] font-mono uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300 font-bold">
-                Terhubung (Live)
-              </span>
-            </div>
-
-            <p className="text-xs text-slate-600">
-              Web App ini terhubung ke Google Spreadsheet PT.WINNERS sebagai basis data utama, dengan Google Apps Script sebagai backend API untuk sinkronisasi transaksi mutasi dan audit stok opname.
-            </p>
-
-            {/* Spreadsheet ID config */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
-                <span>Google Spreadsheet ID:</span>
-                {spreadsheetId && (
-                  <a
-                    href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-cyan-700 hover:text-cyan-600 text-[11px] font-mono underline flex items-center gap-1 font-semibold"
-                  >
-                    <span>Buka Spreadsheet di Google Drive &rarr;</span>
-                  </a>
-                )}
-              </label>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="text"
-                  value={spreadsheetId}
-                  onChange={(e) => setSpreadsheetId(e.target.value)}
-                  placeholder="ID Spreadsheet (cth: 1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio)"
-                  className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-emerald-800 font-mono focus:outline-none focus:border-indigo-500 font-bold"
-                />
-              </div>
-            </div>
-
-            {/* Google Apps Script Web App URL from Environment */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-bold text-slate-700">
-                  Google Apps Script Web App URL (Environment Variable):
-                </label>
-                <span className="text-[10px] font-mono text-slate-500 font-semibold">VITE_GAS_URL</span>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 break-all select-all font-semibold">
-                  {getGasBaseUrl() || 'Belum dikonfigurasi di file .env (VITE_GAS_URL)'}
-                </div>
-                <button
-                  onClick={handleTestGasConnection}
-                  disabled={testingConnection}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold whitespace-nowrap flex items-center justify-center gap-1.5 shadow-sm"
-                >
-                  {testingConnection ? (
-                    <span>Menguji (PING)...</span>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                      <span>Uji Koneksi (PING)</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {connectionMsg && (
-              <div
-                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                  connectionStatus === 'SUCCESS'
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
-                    : 'bg-rose-50 text-rose-800 border border-rose-300'
-                }`}
-              >
-                {connectionStatus === 'SUCCESS' ? (
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-                )}
-                <span className="font-semibold">{connectionMsg}</span>
-              </div>
-            )}
-          </div>
-
-          {/* SINKRONISASI DATA LANGSUNG DARI SHEET "machine_asset" */}
-          <div className="p-5 rounded-2xl bg-emerald-50/50 border border-emerald-200 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-2.5 w-2.5 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
-                  </span>
-                  <h3 className="font-black text-sm text-slate-900 flex items-center gap-1.5">
-                    <span>Tarik & Sinkronisasi Data dari Sheet Real</span>
-                    <span className="font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs border border-emerald-200">
-                      "{targetSheetName}"
-                    </span>
-                  </h3>
-                </div>
-                <p className="text-xs text-slate-600 mt-1">
-                  Ambil seluruh data aset mesin pabrik langsung dari tab sheet <span className="font-mono font-bold text-emerald-700">machine_asset</span> di Google Spreadsheet ID Anda untuk menggantikan data demo.
-                </p>
-              </div>
-
-              <button
-                onClick={handleSyncDataFromSheet}
-                disabled={isSyncingSheet}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-black text-xs shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2 shrink-0 transition-all hover:scale-105 active:scale-95"
-              >
-                <RotateCcw className={`w-4 h-4 ${isSyncingSheet ? 'animate-spin' : ''}`} />
-                <span>{isSyncingSheet ? 'Sedang Menarik Data...' : `Tarik Data dari Sheet "${targetSheetName}" Sekarang`}</span>
-              </button>
-            </div>
-
-            {/* Sheet Target Customizer & Quick Info */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700">Nama Tab Sheet Google Spreadsheet:</label>
-                <input
-                  type="text"
-                  value={targetSheetName}
-                  onChange={(e) => setTargetSheetName(e.target.value)}
-                  placeholder="machine_asset"
-                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-emerald-800 font-mono font-semibold focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="p-3 rounded-xl bg-white border border-slate-200 flex flex-col justify-center text-[11px] text-slate-600">
-                <div className="font-bold text-emerald-700 mb-0.5">Pemetaan Kolom Otomatis:</div>
-                <div>Asset Code • Barcode 12 • Serial • Nama Mesin • Model • Merk • Lokasi • Site • Status</div>
-              </div>
-            </div>
-
-            {/* Sync Feedback Result */}
-            {syncFeedback && (
-              <div
-                className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 ${
-                  syncFeedback.success
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
-                    : 'bg-rose-50 text-rose-800 border border-rose-300'
-                }`}
-              >
-                {syncFeedback.success ? (
-                  <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
-                ) : (
-                  <AlertTriangle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
-                )}
-                <div>
-                  <div className="font-bold">{syncFeedback.message}</div>
-                  {syncFeedback.source && (
-                    <div className="text-[10px] text-slate-500 mt-0.5">Sumber data: {syncFeedback.source}</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <Code className="w-5 h-5 text-indigo-600" />
-                <span>Kode Sumber Google Apps Script (Code.gs)</span>
-              </h2>
-              <p className="text-xs text-slate-500">
-                Kode ini telah otomatis terkonfigurasi dengan Spreadsheet ID <span className="font-mono text-cyan-800 font-bold">{spreadsheetId}</span>.
-              </p>
-            </div>
-
-            <button
-              onClick={handleCopyGas}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
-            >
-              <Copy className="w-4 h-4" />
-              <span>{copiedGas ? 'Tersalin ke Clipboard!' : 'Salin Seluruh Kode .gs'}</span>
-            </button>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 max-h-96 overflow-y-auto font-mono text-xs text-cyan-300 shadow-inner">
-            <pre>{generateGasCodeGs(spreadsheetId)}</pre>
           </div>
         </div>
       )}
