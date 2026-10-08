@@ -50,6 +50,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
   const [selectedManufacturer, setSelectedManufacturer] = useState<string>(initialFilter?.manufacturer ?? 'ALL');
   const [onlyUnassigned, setOnlyUnassigned] = useState(initialFilter?.unassigned ?? false);
   const [typeFilter, setTypeFilter] = useState<string | null>(initialFilter?.typeName ?? null);
+  const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
 
   // Filter hanya berlaku sekali; kosongkan di App agar menu "Data Mesin" biasa tidak ikut terfilter
   useEffect(() => {
@@ -102,7 +103,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
   }, [allMachines]);
 
   // Filtered dataset
-  const filteredMachines = useMemo(() => {
+  const machinesBeforeLocation = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
     return allMachines.filter((m) => {
@@ -148,6 +149,29 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
       return true;
     });
   }, [allMachines, currentUser, selectedSite, selectedStatus, selectedManufacturer, onlyUnassigned, searchQuery, typeFilter]);
+
+  // Jumlah mesin per lokasi, dihitung dari hasil filter lain (kecuali lokasi) agar angka di dropdown
+  // sama dengan jumlah baris tabel setelah lokasi dipilih.
+  const locationCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of machinesBeforeLocation) counts.set(m.locationId, (counts.get(m.locationId) ?? 0) + 1);
+    return counts;
+  }, [machinesBeforeLocation]);
+
+  // Pilihan Lokasi / Line untuk site terpilih. Slot rak WH2 tidak ditampilkan di sini (ada ribuan; pakai WH2 Rack Map).
+  const locationOptions = useMemo(() => {
+    if (selectedSite === 'ALL') return [];
+    return storageService
+      .getLocations(selectedSite)
+      .filter((l) => l.type !== 'RACK_SLOT' && (l.active || (locationCounts.get(l.locationId) ?? 0) > 0))
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.locationId.localeCompare(b.locationId));
+  }, [selectedSite, locationCounts]);
+
+  const filteredMachines = useMemo(() => {
+    if (selectedLocation === 'ALL') return machinesBeforeLocation;
+    return machinesBeforeLocation.filter((m) => m.locationId === selectedLocation);
+  }, [machinesBeforeLocation, selectedLocation]);
 
   // Paginated slice
   const totalPages = Math.ceil(filteredMachines.length / pageSize) || 1;
@@ -376,7 +400,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
         )}
 
         {/* Filter Pills / Selectors */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-3 border-t border-slate-100 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-3 border-t border-slate-100 text-xs">
           {/* Site Filter */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
@@ -386,6 +410,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               value={selectedSite}
               onChange={(e) => {
                 setSelectedSite(e.target.value);
+                setSelectedLocation('ALL');
                 setCurrentPage(1);
               }}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500"
@@ -394,6 +419,31 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               {sites.map((s) => (
                 <option key={s.siteId} value={s.siteId}>
                   {s.siteId} - {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Location / Line Filter */}
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
+              Lokasi / Line:
+            </label>
+            <select
+              value={selectedLocation}
+              disabled={selectedSite === 'ALL'}
+              onChange={(e) => {
+                setSelectedLocation(e.target.value);
+                if (e.target.value !== 'ALL') setOnlyUnassigned(false);
+                setCurrentPage(1);
+              }}
+              className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
+              aria-label="Filter lokasi atau line"
+            >
+              <option value="ALL">{selectedSite === 'ALL' ? 'Pilih site dulu' : 'Semua Lokasi'}</option>
+              {locationOptions.map((l) => (
+                <option key={l.locationId} value={l.locationId}>
+                  {l.displayName} ({(locationCounts.get(l.locationId) ?? 0).toLocaleString()})
                 </option>
               ))}
             </select>
@@ -450,6 +500,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
             <button
               onClick={() => {
                 setOnlyUnassigned(!onlyUnassigned);
+                if (!onlyUnassigned) setSelectedLocation('ALL');
                 setCurrentPage(1);
               }}
               className={`w-full py-1.5 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${

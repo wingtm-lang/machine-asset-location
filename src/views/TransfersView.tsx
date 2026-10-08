@@ -19,6 +19,8 @@ import {
   ClipboardList,
   Sparkles,
   Info,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
@@ -26,6 +28,22 @@ import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 import { Machine, Transfer, SiteId } from '../types';
 import { getMachineLabel } from '../utils/machineName';
+
+// Paginasi riwayat tab "Transfer Terkirim"
+const OUTBOUND_PAGE_SIZE = 10;
+
+/** Daftar tombol halaman, contoh: 1 … 4 5 6 … 12 */
+function buildPageList(current: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | '…')[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) pages.push('…');
+  for (let p = start; p <= end; p++) pages.push(p);
+  if (end < total - 1) pages.push('…');
+  pages.push(total);
+  return pages;
+}
 
 interface TransfersViewProps {
   batchMachines?: Machine[];
@@ -74,6 +92,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [receiveTargetLocationId, setReceiveTargetLocationId] = useState<string>('');
 
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [outboundPage, setOutboundPage] = useState<number>(1);
 
   // Sync batchMachines prop if passed from external navigation
   useEffect(() => {
@@ -86,6 +105,11 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       setActiveTab('send_new');
     }
   }, [batchMachines]);
+
+  // Selalu mulai dari halaman 1 saat membuka tab Transfer Terkirim
+  useEffect(() => {
+    if (activeTab === 'outbound') setOutboundPage(1);
+  }, [activeTab]);
 
   // Focus scan input whenever entering send_new tab
   useEffect(() => {
@@ -114,6 +138,14 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       return canAccessSite(t.fromSite);
     });
   }, [transfers, currentUser]);
+
+  // Paginasi: halaman dijepit agar tetap valid bila jumlah transfer berkurang
+  const outboundTotalPages = Math.max(1, Math.ceil(outboundTransfers.length / OUTBOUND_PAGE_SIZE));
+  const safeOutboundPage = Math.min(outboundPage, outboundTotalPages);
+  const pagedOutboundTransfers = useMemo(() => {
+    const start = (safeOutboundPage - 1) * OUTBOUND_PAGE_SIZE;
+    return outboundTransfers.slice(start, start + OUTBOUND_PAGE_SIZE);
+  }, [outboundTransfers, safeOutboundPage]);
 
   // Available destination locations when receiving
   const destinationLocations = useMemo(() => {
@@ -507,7 +539,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
           </h2>
 
           <div className="space-y-3">
-            {outboundTransfers.map((t) => (
+            {pagedOutboundTransfers.map((t) => (
               <div
                 key={t.transferId}
                 className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
@@ -556,6 +588,60 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
               </div>
             ))}
           </div>
+
+          {outboundTransfers.length > OUTBOUND_PAGE_SIZE && (
+            <nav
+              className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-xs"
+              aria-label="Paginasi riwayat transfer terkirim"
+            >
+              <span className="text-slate-500 dark:text-slate-400">
+                Menampilkan {(safeOutboundPage - 1) * OUTBOUND_PAGE_SIZE + 1}-
+                {Math.min(safeOutboundPage * OUTBOUND_PAGE_SIZE, outboundTransfers.length)} dari {outboundTransfers.length} transfer
+              </span>
+              <div className="flex flex-wrap items-center justify-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setOutboundPage(safeOutboundPage - 1)}
+                  disabled={safeOutboundPage <= 1}
+                  className="px-3 py-1.5 min-h-[40px] min-w-[40px] rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1"
+                  aria-label="Halaman sebelumnya"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Sebelumnya</span>
+                </button>
+                {buildPageList(safeOutboundPage, outboundTotalPages).map((p, i) =>
+                  p === '…' ? (
+                    <span key={`gap-${i}`} className="px-1 text-slate-400">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setOutboundPage(p)}
+                      aria-label={`Halaman ${p}`}
+                      aria-current={p === safeOutboundPage ? 'page' : undefined}
+                      className={`px-3 py-1.5 min-h-[40px] min-w-[40px] rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                        p === safeOutboundPage
+                          ? 'bg-emerald-700 text-white border-emerald-700'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  onClick={() => setOutboundPage(safeOutboundPage + 1)}
+                  disabled={safeOutboundPage >= outboundTotalPages}
+                  className="px-3 py-1.5 min-h-[40px] min-w-[40px] rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1"
+                  aria-label="Halaman berikutnya"
+                >
+                  <span className="hidden sm:inline">Berikutnya</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </nav>
+          )}
         </div>
       )}
 

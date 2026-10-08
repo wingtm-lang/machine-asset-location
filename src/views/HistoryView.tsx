@@ -16,6 +16,7 @@ import {
 import { useAuth } from '../services/authContext';
 import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
 import { Pagination } from '../components/Pagination';
+import { formatDateTime } from '../utils/dateTime';
 
 const PAGE_SIZE = 25;
 
@@ -455,8 +456,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                     >
                       {/* Waktu */}
                       <td className="py-3.5 px-4 whitespace-nowrap align-top">
-                        <div className="font-mono text-slate-900 dark:text-slate-100 font-semibold">
-                          {m.timestamp}
+                        <div
+                          className="font-mono text-slate-900 dark:text-slate-100 font-semibold"
+                          title={m.timestamp}
+                        >
+                          {formatDateTime(m.timestamp, { seconds: true })}
                         </div>
                         {m.isUndone && (
                           <span className="inline-block mt-1 text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900">
@@ -556,7 +560,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                 <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
                   <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
                     <Clock className="w-3 h-3" />
-                    <span>{m.timestamp}</span>
+                    <span title={m.timestamp}>{formatDateTime(m.timestamp, { seconds: true })}</span>
                   </div>
                   {m.isUndone ? (
                     <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 border border-rose-200">
