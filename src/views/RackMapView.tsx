@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { ScannerModal } from '../components/ScannerModal'; // sesuaikan path bila file ada di folder lain
 import {
   WH2_RACKS,
   RackConfig,
@@ -8,7 +9,7 @@ import {
 import { getGasBaseUrl } from '../services/gasAuthService';
 import { RoomMap } from '../components/rackmap/RoomMap';
 import { RackDetail, SelectedColumnCoord } from '../components/rackmap/RackDetail';
-import { SlotPanel } from '../components/rackmap/SlotPanel';
+import { SlotPanel, SlotScanInput } from '../components/rackmap/SlotPanel';
 import { useAuth } from '../services/authContext';
 import {
   RotateCcw,
@@ -21,6 +22,23 @@ import {
 
 interface RackMapViewProps {
   onOpenScanner?: () => void;
+}
+
+/** true bila lebar layar >= 1024px (breakpoint "lg"), mengikuti perubahan ukuran layar. */
+function useIsDesktop(): boolean {
+  const query = '(min-width: 1024px)';
+  const [matches, setMatches] = useState<boolean>(
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : true
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(query);
+    const onChange = () => setMatches(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return matches;
 }
 
 interface ToastMessage {
@@ -41,6 +59,11 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
   const [slots, setSlots] = useState<RackSlotItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+
+  // Pemindai kamera untuk slot rak
+  const isDesktop = useIsDesktop();
+  const [scanSlot, setScanSlot] = useState<number | null>(null); // slot tujuan; null = pemindai tertutup
+  const [scanInput, setScanInput] = useState<SlotScanInput | null>(null);
 
   const gasUrl = getGasBaseUrl();
 
@@ -79,6 +102,31 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
   useEffect(() => {
     fetchMapData();
   }, [fetchMapData]);
+
+  const positionCode = selectedRack && selectedCoord ? `${selectedRack.id}-${selectedCoord.level}${selectedCoord.column}` : '';
+
+  // Tombol Scan di header: bila ada kolom terbuka, arahkan ke slot kosong pertama kolom itu.
+  const handleHeaderScan = () => {
+    if (selectedRack && selectedCoord) {
+      const firstEmpty = [1, 2, 3].find(
+        (n) =>
+          !slots.some(
+            (s) =>
+              s.rak === selectedRack.id &&
+              s.tingkat === selectedCoord.level &&
+              s.kolom === selectedCoord.column &&
+              s.slot === n
+          )
+      );
+      if (!firstEmpty) {
+        showToast('warning', `Semua slot di ${positionCode} sudah terisi. Pilih kolom lain atau keluarkan mesin dulu.`);
+        return;
+      }
+      setScanSlot(firstEmpty);
+      return;
+    }
+    onOpenScanner?.();
+  };
 
   // Total capacity across all 6 racks: 144 columns x 3 levels x 3 slots = 1296 slots
   const totalCapacity = WH2_RACKS.reduce((acc, r) => acc + r.n * 3 * 3, 0);
@@ -138,16 +186,14 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
           </button>
 
           {/* Tombol Utama Scan (Ikon + Teks) */}
-          {onOpenScanner && (
-            <button
-              type="button"
-              onClick={onOpenScanner}
-              className="px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-            >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>Scan</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleHeaderScan}
+            className="px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+          >
+            <QrCode className="w-3.5 h-3.5" />
+            <span>Scan</span>
+          </button>
         </div>
       </div>
 
@@ -188,6 +234,8 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
               onClose={() => setSelectedCoord(null)}
               onNotifyToast={showToast}
               onOpenScanner={onOpenScanner}
+              onRequestScan={setScanSlot}
+              scanInput={isDesktop ? scanInput : null}
             />
           ) : (
             <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 text-center flex flex-col items-center justify-center min-h-[280px] text-slate-400 dark:text-slate-500 space-y-2.5 shadow-xs">
@@ -218,10 +266,23 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
               onClose={() => setSelectedCoord(null)}
               onNotifyToast={showToast}
               onOpenScanner={onOpenScanner}
+              onRequestScan={setScanSlot}
+              scanInput={isDesktop ? null : scanInput}
             />
           </div>
         </div>
       )}
+
+      {/* Pemindai kamera untuk slot terbuka: hasil barcode ditempel ke kolom Cari slot tujuan */}
+      <ScannerModal
+        isOpen={scanSlot !== null}
+        onClose={() => setScanSlot(null)}
+        initialMode="camera"
+        captureLabel={scanSlot !== null ? `Scan ke slot ${positionCode} / Slot ${scanSlot}` : undefined}
+        onCapture={(code) => {
+          if (scanSlot !== null) setScanInput({ slot: scanSlot, code, nonce: Date.now() });
+        }}
+      />
 
       {/* 8) TOAST NOTIFIKASI KECIL DI POJOK (Bukan Blok Pesan di Halaman) */}
       {toast && (

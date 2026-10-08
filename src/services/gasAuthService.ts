@@ -66,6 +66,15 @@ function errMessage(e: unknown): string {
   return msg || 'Terjadi kesalahan saat menghubungi server.';
 }
 
+/** 'YYYY-MM-DD' (tanggal kalender WIB) -> ISO UTC untuk 00:00 WIB hari itu (+ plusDays). Null bila tidak valid. */
+function wibDayStartIso(dateStr?: string, plusDays = 0): string | null {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const d = new Date(`${dateStr}T00:00:00+07:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate() + plusDays); // WIB tidak memakai DST, 1 hari = 24 jam
+  return d.toISOString();
+}
+
 function authorityText(role: UserServerRole, site: string | null): string {
   if (role === 'ADMIN_MASTER') return 'admin master';
   if (role === 'ALL_SITES') return 'All sites';
@@ -185,7 +194,16 @@ export const gasAuthService = {
         .order('id', { ascending: false })
         .limit(limit + 1);
       if (params.assetCode) q = q.eq('asset_code', params.assetCode.trim().toUpperCase());
-      if (params.from) q = q.order('moved_at', { ascending: false });
+      // Filter site: perpindahan yang keluar dari ATAU masuk ke site itu (transfer PW1 -> PW2 muncul di keduanya)
+      if (params.site) {
+        const site = params.site.trim().toUpperCase();
+        if (/^[A-Z0-9]{2,5}$/.test(site)) q = q.or(`from_site_id.eq.${site},to_site_id.eq.${site}`);
+      }
+      // Filter tanggal: hari kalender WIB. "Sampai tanggal" ikut dihitung sampai akhir hari itu.
+      const fromIso = wibDayStartIso(params.from);
+      if (fromIso) q = q.gte('moved_at', fromIso);
+      const toIso = wibDayStartIso(params.to, 1);
+      if (toIso) q = q.lt('moved_at', toIso);
       const { data, error } = await q;
       if (error) return { success: false, hasMore: false, movements: [], message: errMessage(error) };
       const rows = data ?? [];

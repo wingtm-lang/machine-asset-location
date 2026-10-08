@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   RackConfig,
   RackSlotItem,
@@ -28,6 +28,16 @@ interface SlotPanelProps {
   onClose: () => void;
   onNotifyToast?: (type: 'success' | 'error' | 'warning', text: string) => void;
   onOpenScanner?: () => void;
+  /** Ikon scan per slot: minta pemindai kamera untuk slot ini (hasilnya kembali lewat scanInput). */
+  onRequestScan?: (slotNumber: number) => void;
+  /** Hasil scan dari pemindai kamera. Diproses sekali per nonce: masuk ke kolom Cari slot lalu otomatis dicari. */
+  scanInput?: SlotScanInput | null;
+}
+
+export interface SlotScanInput {
+  slot: number;
+  code: string;
+  nonce: number;
 }
 
 export const SlotPanel: React.FC<SlotPanelProps> = ({
@@ -39,6 +49,8 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
   onClose,
   onNotifyToast,
   onOpenScanner,
+  onRequestScan,
+  scanInput,
 }) => {
   const positionCode = `${rack.id}-${coord.level}${coord.column}`;
 
@@ -91,8 +103,8 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
   const filledCount = [1, 2, 3].filter((slotNum) => Boolean(getSlotItem(slotNum))).length;
 
   // Search handler for empty slot
-  const handleSearch = async (slotNumber: number) => {
-    const query = (searchQueries[slotNumber] || '').trim();
+  const handleSearch = async (slotNumber: number, override?: string) => {
+    const query = (override ?? searchQueries[slotNumber] ?? '').trim();
     if (!query) {
       notify('warning', 'Ketik kode aset, barcode, atau serial mesin.');
       return;
@@ -115,6 +127,18 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
       setSearchingSlot(null);
     }
   };
+
+  // Hasil scan kamera: tempel ke kolom Cari slot tujuan, lalu cari otomatis.
+  // Penempatan tetap menunggu klik "Tempatkan" (tanpa auto-assign).
+  const lastScanNonce = useRef<number | undefined>(scanInput?.nonce);
+  useEffect(() => {
+    if (!scanInput || scanInput.nonce === lastScanNonce.current) return;
+    lastScanNonce.current = scanInput.nonce;
+    setSearchQueries((prev) => ({ ...prev, [scanInput.slot]: scanInput.code }));
+    setSearchResults((prev) => ({ ...prev, [scanInput.slot]: null }));
+    handleSearch(scanInput.slot, scanInput.code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanInput?.nonce]);
 
   // Assign machine to slot
   const handleAssign = async (slotNumber: number, machine: MachineSearchResult) => {
@@ -376,11 +400,11 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                         <span>Cari</span>
                       )}
                     </button>
-                    {onOpenScanner && (
+                    {(onRequestScan || onOpenScanner) && (
                       <button
                         type="button"
                         disabled={isGlobalLoading}
-                        onClick={onOpenScanner}
+                        onClick={() => (onRequestScan ? onRequestScan(slotNumber) : onOpenScanner?.())}
                         className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
                         title="Scan barcode"
                       >

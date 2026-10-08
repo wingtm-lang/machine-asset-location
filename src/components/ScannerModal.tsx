@@ -23,6 +23,15 @@ interface ScannerModalProps {
   onClose: () => void;
   onSelectMachine?: (machine: Machine) => void;
   onQuickMove?: (machine: Machine) => void;
+  /**
+   * Mode "tangkap hasil" (dipakai WH2 Rack Map): bila diisi, begitu barcode terbaca dan mesinnya ditemukan,
+   * modal langsung menutup dan memanggil onCapture(kode, mesin). Kartu detail mesin tidak ditampilkan.
+   */
+  onCapture?: (code: string, machine: Machine) => void;
+  /** Judul header pada mode tangkap, contoh: "Scan ke slot R4-B12 / Slot 2". */
+  captureLabel?: string;
+  /** Mode awal saat modal dibuka. Bila kosong, memakai mode terakhir. */
+  initialMode?: 'physical' | 'camera';
 }
 
 export const ScannerModal: React.FC<ScannerModalProps> = ({
@@ -30,6 +39,9 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   onClose,
   onSelectMachine,
   onQuickMove,
+  onCapture,
+  captureLabel,
+  initialMode,
 }) => {
   const { language, canAccessSite } = useAuth();
   const [mode, setMode] = useState<'physical' | 'camera'>('physical');
@@ -46,6 +58,15 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameId = useRef<number | null>(null);
+
+  // Pilih mode awal setiap kali modal dibuka (hanya bila pemanggil menentukannya)
+  useEffect(() => {
+    if (isOpen && initialMode) {
+      setMode(initialMode);
+      setScannedMachine(null);
+      setErrorMessage(null);
+    }
+  }, [isOpen, initialMode]);
 
   // Auto-focus input for 2D physical scanner
   useEffect(() => {
@@ -161,6 +182,24 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     const { machine, searchTimeMs } = storageService.getMachineByCode(cleanCode);
     setSearchLatency(searchTimeMs);
 
+    // Mode tangkap: serahkan hasil ke pemanggil, tutup modal, tanpa kartu detail.
+    if (onCapture) {
+      if (machine) {
+        soundService.playSuccess();
+        stopCamera();
+        onCapture(cleanCode, machine);
+        onClose();
+      } else {
+        soundService.playError();
+        setErrorMessage(`Mesin dengan Barcode/Kode Aset "${cleanCode}" tidak ditemukan di database.`);
+        // Lanjutkan memindai setelah jeda singkat agar pesan tidak berkedip dan tidak memicu bacaan ganda.
+        setTimeout(() => {
+          if (streamRef.current) animationFrameId.current = requestAnimationFrame(tickVideoScan);
+        }, 1200);
+      }
+      return;
+    }
+
     if (machine) {
       soundService.playSuccess();
       setScannedMachine(machine);
@@ -207,10 +246,12 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-900">
-                {getTranslation('scan_modal_title', language)}
+                {captureLabel ?? getTranslation('scan_modal_title', language)}
               </h3>
               <p className="text-xs text-slate-500">
-                {mode === 'physical'
+                {onCapture
+                  ? 'Hasil scan otomatis dimasukkan ke kolom Cari slot'
+                  : mode === 'physical'
                   ? 'Siap menerima scan dari barcode gun 2D (QR Code)'
                   : 'Arahkan kamera ke QR Code label mesin'}
               </p>
