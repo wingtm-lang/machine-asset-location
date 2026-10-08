@@ -3,7 +3,6 @@ import { useAuth } from '../services/authContext';
 import {
   Menu,
   QrCode,
-  Zap,
   KeyRound,
   LogOut,
   ChevronDown,
@@ -27,7 +26,6 @@ interface AppHeaderProps {
   isSyncing?: boolean;
   onOpenMobileSidebar: () => void;
   onOpenScanner: () => void;
-  onOpenBenchmark: () => void;
   onOpenChangePassword: () => void;
   onOpenLogout?: () => void;
 }
@@ -35,7 +33,7 @@ interface AppHeaderProps {
 const TAB_TITLES: Record<string, { title: string; subtitle: string; icon: any }> = {
   home: { title: 'Beranda', subtitle: 'Ringkasan Sistem & Modul Asset', icon: LayoutGrid },
   dashboard: { title: 'Dashboard Asset', subtitle: 'Metrik & Distribusi Mesin Pabrik', icon: LayoutDashboard },
-  machines: { title: 'Data Mesin', subtitle: 'Inventaris 5.700+ Mesin Jahit', icon: Boxes },
+  machines: { title: 'Data Mesin', subtitle: 'Inventaris Mesin Jahit', icon: Boxes },
   rackmap: { title: 'WH2 Rack Map', subtitle: 'Denah Visual Rak R1–R6 Warehouse 2', icon: Grid },
   move: { title: 'Pindahkan Lokasi', subtitle: 'Mutasi Posisi Line & Rak', icon: Layers },
   transfers: { title: 'Transfer Antar Site', subtitle: 'Kirim & Terima Antar Pabrik', icon: ArrowRightLeft },
@@ -51,7 +49,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   isSyncing,
   onOpenMobileSidebar,
   onOpenScanner,
-  onOpenBenchmark,
   onOpenChangePassword,
   onOpenLogout,
 }) => {
@@ -127,17 +124,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           >
             <QrCode className="w-3.5 h-3.5 stroke-[2.5]" />
             <span className="hidden sm:inline">Scan</span>
-          </button>
-
-          {/* Tombol Uji Kecepatan 5.7k */}
-          <button
-            type="button"
-            onClick={onOpenBenchmark}
-            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-[#ffd23f]/30 bg-[#ffd23f]/10 text-[#ffd23f] hover:bg-[#ffd23f]/20 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Speed Benchmark 5.700 Mesin"
-          >
-            <Zap className="w-3.5 h-3.5 fill-[#ffd23f] text-[#ffd23f]" />
-            <span className="hidden lg:inline">5.7k Test</span>
           </button>
 
           {/* User Profile Pill & Dropdown */}

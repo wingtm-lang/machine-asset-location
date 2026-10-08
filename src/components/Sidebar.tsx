@@ -12,7 +12,6 @@ import {
   Users,
   ShieldAlert,
   QrCode,
-  Zap,
   Languages,
   KeyRound,
   LogOut,
@@ -28,7 +27,6 @@ interface SidebarProps {
   activeTab: string;
   onSelectTab: (tab: string) => void;
   onOpenScanner: () => void;
-  onOpenBenchmark: () => void;
   onOpenChangePassword: () => void;
   onOpenLogout?: () => void;
   isOpenMobile?: boolean;
@@ -39,7 +37,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   onSelectTab,
   onOpenScanner,
-  onOpenBenchmark,
   onOpenChangePassword,
   onOpenLogout,
   isOpenMobile = false,
@@ -68,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'home', label: 'Beranda', icon: LayoutGrid, show: true, badge: 'Home' },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true, badge: 'Live' },
-    { id: 'machines', label: 'Data Mesin', icon: Boxes, show: true, badge: '5.7k' },
+    { id: 'machines', label: 'Data Mesin', icon: Boxes, show: true },
     { id: 'rackmap', label: 'WH2 Rack Map', icon: Grid, show: canUseRackMap, badge: 'WH2' },
     {
       id: 'move',
@@ -224,22 +221,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bagian Bawah: Profile Card, Quick Tools & Logout */}
       <div className="space-y-3 pt-4 border-t border-[#1d477c]/60 mt-4">
-        {/* Quick Tools Row (5.7k Test & Bahasa ID/EN) */}
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <button
-            type="button"
-            onClick={onOpenBenchmark}
-            className="p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#ffd23f]/30 bg-[#ffd23f]/10 hover:bg-[#ffd23f]/20 text-[#ffd23f] transition-all cursor-pointer shadow-2xs"
-            title="Speed Benchmark 5.7k Mesin"
-          >
-            <Zap className="w-3.5 h-3.5 fill-[#ffd23f] text-[#ffd23f]" />
-            <span>5.7k Test</span>
-          </button>
-
+        {/* Quick Tools Row (Bahasa ID/EN) */}
+        <div className="text-xs">
           <button
             type="button"
             onClick={() => setLanguage(language === 'id' ? 'en' : 'id')}
-            className="p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
+            className="w-full p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
             title="Ganti Bahasa (ID / EN)"
           >
             <Languages className="w-3.5 h-3.5 text-[#7fb2e8]" />

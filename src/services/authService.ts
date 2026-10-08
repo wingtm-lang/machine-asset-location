@@ -5,7 +5,7 @@
  */
 import { supabase, isSupabaseConfigured } from './supabase';
 
-export type ServerRole = 'ADMIN_MASTER' | 'ALL_SITES' | 'FACTORY';
+export type ServerRole = 'ADMIN_MASTER' | 'ALL_SITES' | 'FACTORY' | 'WAREHOUSE';
 
 export interface AuthUser {
   username: string; // NIK

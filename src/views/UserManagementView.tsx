@@ -174,6 +174,17 @@ export const UserManagementView: React.FC = () => {
         desc: 'Akses ke semua site dan Rack Map WH2. Tidak dapat mengelola pengguna.',
       };
     }
+    if (['warehouse2', 'warehouse', 'wh2'].includes(authLower.replace(/\s+/g, ''))) {
+      return {
+        role: 'WAREHOUSE' as UserServerRole,
+        roleLabel: 'Warehouse',
+        roleBadgeColor: 'bg-teal-100 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
+        sites: ['WH2'],
+        rackMap: true,
+        canAddUser: false,
+        desc: 'Dibatasi hanya untuk mesin di Warehouse 2 (WH2). Dapat mengakses Rack Map WH2. Tidak dapat mengelola pengguna.',
+      };
+    }
     if (['PW1', 'PW2', 'PW3'].includes(authValue.toUpperCase())) {
       const site = authValue.toUpperCase();
       return {
@@ -762,6 +773,7 @@ export const UserManagementView: React.FC = () => {
                 <option value="PW1">PW1 - Pabrik Factory 1</option>
                 <option value="PW2">PW2 - Pabrik Factory 2</option>
                 <option value="PW3">PW3 - Pabrik Factory 3</option>
+                <option value="Warehouse 2">Warehouse 2 - hanya WH2 + Rack Map</option>
               </select>
             </div>
 
@@ -889,6 +901,7 @@ export const UserManagementView: React.FC = () => {
                 <option value="ADMIN_MASTER">Admin Master</option>
                 <option value="ALL_SITES">All Sites</option>
                 <option value="FACTORY">Factory</option>
+                <option value="WAREHOUSE">Warehouse</option>
                 <option value="UNKNOWN">Unknown</option>
               </select>
             </div>
@@ -1025,6 +1038,8 @@ export const UserManagementView: React.FC = () => {
                                 ? 'Admin Master'
                                 : u.role === 'ALL_SITES'
                                 ? 'All Sites'
+                                : u.role === 'WAREHOUSE'
+                                ? 'Warehouse'
                                 : u.role === 'FACTORY'
                                 ? 'Factory'
                                 : 'Unknown'}
@@ -1402,6 +1417,7 @@ export const UserManagementView: React.FC = () => {
                   <option value="PW1">PW1 - Pabrik Factory 1</option>
                   <option value="PW2">PW2 - Pabrik Factory 2</option>
                   <option value="PW3">PW3 - Pabrik Factory 3</option>
+                  <option value="Warehouse 2">Warehouse 2 - hanya WH2 + Rack Map</option>
                 </select>
               </div>
 

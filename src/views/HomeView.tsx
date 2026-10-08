@@ -17,19 +17,16 @@ import {
   CheckCircle2,
   Lock,
   QrCode,
-  Zap,
 } from 'lucide-react';
 
 interface HomeViewProps {
   onNavigateTab: (tab: string) => void;
   onOpenScanner?: () => void;
-  onOpenBenchmark?: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateTab,
   onOpenScanner,
-  onOpenBenchmark,
 }) => {
   const { currentUser, canUseRackMap, canAddUser, canPerformAction } = useAuth();
   const siteList = currentUser?.siteAccess || [];
@@ -46,10 +43,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
     {
       id: 'machines',
       title: 'Data Mesin',
-      desc: 'Pencarian & inventaris 5.700+ mesin jahit, detail serial, mutasi batch, dan filter status.',
+      desc: 'Pencarian & inventaris mesin jahit, detail serial, mutasi batch, dan filter status.',
       icon: Boxes,
       allowed: true,
-      badge: '5.7k Mesin',
+      badge: 'Inventaris',
     },
     {
       id: 'rackmap',
@@ -162,17 +159,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
               >
                 <QrCode className="w-4 h-4 stroke-[2.5]" />
                 <span>Scan Barcode</span>
-              </button>
-            )}
-
-            {onOpenBenchmark && (
-              <button
-                type="button"
-                onClick={onOpenBenchmark}
-                className="px-3.5 py-2.5 rounded-xl border border-[#ffd23f]/40 bg-[#ffd23f]/10 hover:bg-[#ffd23f]/20 text-[#ffd23f] font-bold text-xs flex items-center gap-2 transition-transform active:scale-95 cursor-pointer"
-              >
-                <Zap className="w-4 h-4 fill-[#ffd23f] text-[#ffd23f]" />
-                <span>5.7k Test</span>
               </button>
             )}
 

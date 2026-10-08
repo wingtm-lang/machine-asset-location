@@ -41,6 +41,8 @@ function canonicalAuthority(input: string): { text: string; role: string; site: 
   const s = String(input || '').toLowerCase().replace(/\s+/g, '');
   if (s === 'adminmaster') return { text: 'admin master', role: 'ADMIN_MASTER', site: null };
   if (s === 'allsites') return { text: 'All sites', role: 'ALL_SITES', site: null };
+  // Role WAREHOUSE: terikat ke site WH2 (RLS memakai factory_site, jadi mesin otomatis hanya WH2)
+  if (s === 'warehouse' || s === 'warehouse2' || s === 'wh2') return { text: 'Warehouse 2', role: 'WAREHOUSE', site: 'WH2' };
   const m = /^(?:pt\.?winners|pw)\(?([1-3])\)?$/.exec(s);
   if (m) return { text: `PT.Winners(${m[1]})`, role: 'FACTORY', site: `PW${m[1]}` };
   return null;
@@ -111,7 +113,7 @@ Deno.serve(async (req: Request) => {
     }
     const auth = canonicalAuthority(authorityInput);
     if (!auth) {
-      return respond({ success: false, message: 'Authority tidak valid (admin master / all sites / PW1 / PW2 / PW3).' });
+      return respond({ success: false, message: 'Authority tidak valid (admin master / all sites / warehouse 2 / PW1 / PW2 / PW3).' });
     }
 
     const { data: existing } = await admin.from('profiles').select('nik').ilike('nik', nik).maybeSingle();

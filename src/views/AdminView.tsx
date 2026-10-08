@@ -6,7 +6,6 @@ import {
   Users,
   Wrench,
   FileSpreadsheet,
-  Code,
   Sliders,
   CheckCircle2,
   AlertTriangle,
@@ -23,6 +22,7 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
 import { storageService } from '../services/storage';
+import { gasAuthService, getGasBaseUrl } from '../services/gasAuthService';
 import { Site, Location, Rack, User, UserRole, AppSettings } from '../types';
 
 export const AdminView: React.FC = () => {
@@ -58,13 +58,83 @@ export const AdminView: React.FC = () => {
   const users = storageService.getUsers();
   const settings = storageService.getSettings();
 
+  const [spreadsheetId, setSpreadsheetId] = useState(
+    settings.spreadsheetId || '1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio'
+  );
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'SUCCESS' | 'ERROR'>('IDLE');
+  const [connectionMsg, setConnectionMsg] = useState('');
+
   const [notification, setNotification] = useState<string | null>(null);
+
+  // Live Sheet Sync State
+  const [targetSheetName, setTargetSheetName] = useState('machine_asset');
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    success: boolean;
+    message: string;
+    count?: number;
+    source?: string;
+  } | null>(null);
+
+  // Sync Data Directly from Sheet (machine_asset)
+  const handleSyncDataFromSheet = async () => {
+    setIsSyncingSheet(true);
+    setSyncFeedback(null);
+    try {
+      const res = await storageService.syncFromGoogleSheet(spreadsheetId, targetSheetName);
+      setSyncFeedback(res);
+      if (res.success) {
+        setNotification(`Sinkronisasi berhasil! ${res.count} data mesin dimuat dari "${targetSheetName}".`);
+      }
+    } catch (e: any) {
+      setSyncFeedback({
+        success: false,
+        message: 'Terjadi kendala saat menghubungkan ke Google Spreadsheet: ' + e.message,
+      });
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
 
   // Clear Database & Dummy Records
   const handleClearDatabase = () => {
-    if (window.confirm('Apakah Anda yakin ingin mengosongkan cache mesin? Data di server Supabase tetap aman.')) {
+    if (window.confirm('Apakah Anda yakin ingin menghapus seluruh data mesin dummy / lokal? Database akan dikosongkan untuk kemudian ditarik dari Google Spreadsheet.')) {
       storageService.clearAllData(true);
-      setNotification('Cache data mesin lokal telah dibersihkan.');
+      setNotification('Seluruh data mesin lokal / dummy telah berhasil dihapus. Database sekarang bersih (0 mesin).');
+    }
+  };
+
+  // Test GAS Web App Connection via PING & Save Spreadsheet ID
+  const handleTestGasConnection = async () => {
+    setTestingConnection(true);
+    setConnectionStatus('IDLE');
+    setConnectionMsg('Menguji konektivitas server Google Apps Script (PING)...');
+
+    try {
+      // Save spreadsheet ID to local settings
+      storageService.updateSettings({
+        ...settings,
+        spreadsheetId: spreadsheetId.trim(),
+      });
+
+      const res = await gasAuthService.ping();
+      if (res && res.success) {
+        setConnectionStatus('SUCCESS');
+        setConnectionMsg(
+          `Koneksi Berhasil! Version: ${res.version || 'v1.0'}${
+            res.timestamp ? ` (Waktu Server: ${res.timestamp})` : ''
+          }`
+        );
+      } else {
+        setConnectionStatus('ERROR');
+        setConnectionMsg(res?.message || 'Server Google Apps Script tidak merespons PING.');
+      }
+    } catch (err: any) {
+      setConnectionStatus('ERROR');
+      setConnectionMsg(`Gagal terhubung ke server: ${err.message || 'Error jaringan'}`);
+    } finally {
+      setTestingConnection(false);
     }
   };
 
@@ -166,7 +236,7 @@ export const AdminView: React.FC = () => {
           </h1>
         </div>
         <p className="text-xs text-slate-500">
-          Kelola master data site, line pabrik, rak WH2, pengguna & hak akses RBAC, dan audit data Bagian C.
+          Kelola master data site, line pabrik, rak WH2, pengguna & hak akses RBAC, audit data Bagian C, dan generator Apps Script.
         </p>
       </div>
 
@@ -600,7 +670,7 @@ export const AdminView: React.FC = () => {
             <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
               <div className="font-bold text-slate-900 text-sm">Ekspor Database Lengkap:</div>
               <p className="text-slate-500">
-                Unduh seluruh data 5.700+ mesin PT.WINNERS beserta riwayat lengkap dalam format file Excel .xlsx
+                Unduh seluruh data mesin PT.WINNERS beserta riwayat lengkap dalam format file Excel .xlsx
               </p>
               <button
                 onClick={handleExportFullDb}
@@ -647,6 +717,7 @@ export const AdminView: React.FC = () => {
           </div>
         </div>
       )}
+
     </div>
   );
 };

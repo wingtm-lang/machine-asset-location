@@ -11,7 +11,7 @@
 
 import { supabase } from './supabase';
 
-export type UserServerRole = 'ADMIN_MASTER' | 'ALL_SITES' | 'FACTORY' | 'UNKNOWN';
+export type UserServerRole = 'ADMIN_MASTER' | 'ALL_SITES' | 'FACTORY' | 'WAREHOUSE' | 'UNKNOWN';
 
 export interface GasManagedUser {
   nik: string;
@@ -70,6 +70,7 @@ function authorityText(role: UserServerRole, site: string | null): string {
   if (role === 'ADMIN_MASTER') return 'admin master';
   if (role === 'ALL_SITES') return 'All sites';
   if (role === 'FACTORY' && site) return `PT.Winners(${site.replace('PW', '')})`;
+  if (role === 'WAREHOUSE') return 'Warehouse 2';
   return 'PW1';
 }
 
@@ -77,6 +78,7 @@ function parseAuthorityInput(authority: string): { role: UserServerRole; site: s
   const s = authority.toLowerCase().replace(/\s+/g, '');
   if (s === 'adminmaster') return { role: 'ADMIN_MASTER', site: null };
   if (s === 'allsites') return { role: 'ALL_SITES', site: null };
+  if (s === 'warehouse2' || s === 'warehouse' || s === 'wh2') return { role: 'WAREHOUSE', site: 'WH2' };
   const m = /^(?:pt\.?winners|pw)\(?([1-3])\)?$/.exec(s);
   if (m) return { role: 'FACTORY', site: `PW${m[1]}` };
   return null;
@@ -110,7 +112,7 @@ export const gasAuthService = {
         profile: String(r.display_name),
         authority: authorityText(role, site),
         role,
-        sites: role === 'FACTORY' && site ? [site] : ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA'],
+        sites: (role === 'FACTORY' || role === 'WAREHOUSE') && site ? [site] : ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA'],
         rackMap: role !== 'FACTORY',
         canAddUser: role === 'ADMIN_MASTER',
         active: Boolean(r.active),

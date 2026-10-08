@@ -11,7 +11,6 @@ import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { LogoutModal } from './components/LogoutModal';
 import { ScannerModal } from './components/ScannerModal';
 import { MachineDetailModal } from './components/MachineDetailModal';
-import { SpeedBenchmarkModal } from './components/SpeedBenchmarkModal';
 import { DashboardView } from './views/DashboardView';
 import { MachinesListView } from './views/MachinesListView';
 import { MoveView } from './views/MoveView';
@@ -79,7 +78,6 @@ const MainAppInner: React.FC = () => {
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState<boolean>(false);
   const [isLogoutOpen, setIsLogoutOpen] = useState<boolean>(false);
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
-  const [isBenchmarkOpen, setIsBenchmarkOpen] = useState<boolean>(false);
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState<boolean>(false);
 
@@ -165,7 +163,6 @@ const MainAppInner: React.FC = () => {
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         onOpenScanner={() => setIsScannerOpen(true)}
-        onOpenBenchmark={() => setIsBenchmarkOpen(true)}
         onOpenChangePassword={() => setIsChangePasswordOpen(true)}
         onOpenLogout={() => setIsLogoutOpen(true)}
         isOpenMobile={isMobileSidebarOpen}
@@ -180,7 +177,6 @@ const MainAppInner: React.FC = () => {
           isSyncing={isSyncing}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           onOpenScanner={() => setIsScannerOpen(true)}
-          onOpenBenchmark={() => setIsBenchmarkOpen(true)}
           onOpenChangePassword={() => setIsChangePasswordOpen(true)}
           onOpenLogout={() => setIsLogoutOpen(true)}
         />
@@ -192,7 +188,6 @@ const MainAppInner: React.FC = () => {
           <HomeView
             onNavigateTab={setActiveTab}
             onOpenScanner={() => setIsScannerOpen(true)}
-            onOpenBenchmark={() => setIsBenchmarkOpen(true)}
           />
         )}
 
@@ -329,12 +324,6 @@ const MainAppInner: React.FC = () => {
         onClose={() => setIsScannerOpen(false)}
         onSelectMachine={handleOpenDetail}
         onQuickMove={handleMoveSingle}
-      />
-
-      {/* Speed Benchmark Modal */}
-      <SpeedBenchmarkModal
-        isOpen={isBenchmarkOpen}
-        onClose={() => setIsBenchmarkOpen(false)}
       />
 
       {/* Machine Detail Modal */}
