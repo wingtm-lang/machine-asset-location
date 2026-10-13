@@ -988,6 +988,66 @@ class StorageService {
     return { success: true, message: res.message };
   }
 
+  /**
+   * Data untuk cetak Surat Jalan satu order transfer. Sengaja dibaca dari `movements`
+   * (baris TRANSFER_OUT), bukan dari `machines`/`transfer_items` saat ini: surat jalan
+   * harus merepresentasikan manifest SAAT BARANG DIKIRIM, bukan kondisi mesin sekarang.
+   * movements bersifat append-only, jadi hasilnya tidak akan berubah walau mesinnya
+   * sudah berpindah lagi setelah itu. orderId = id numerik transfers (lihat transferMeta).
+   */
+  public async getSuratJalanData(orderId: number): Promise<{
+    success: boolean;
+    message?: string;
+    data?: import('./suratJalan').SuratJalanData;
+  }> {
+    try {
+      const [{ data: t, error: tErr }, { data: mv, error: mvErr }] = await Promise.all([
+        supabase
+          .from('transfers')
+          .select('transfer_no, vehicle_no, driver_name, created_at, to_site_id, sites:to_site_id(name)')
+          .eq('id', orderId)
+          .maybeSingle(),
+        supabase
+          .from('movements')
+          .select('asset_code, barcode, serial, machine_name')
+          .eq('transfer_id', orderId)
+          .eq('movement_type', 'TRANSFER_OUT')
+          .order('id', { ascending: true }),
+      ]);
+      if (tErr) throw tErr;
+      if (mvErr) throw mvErr;
+      if (!t) return { success: false, message: 'Transfer tidak ditemukan.' };
+
+      const site = (t as Row).sites as Row | Row[] | null;
+      const toSiteName = Array.isArray(site) ? site[0]?.name : site?.name;
+
+      return {
+        success: true,
+        data: {
+          transferNo: String(t.transfer_no),
+          vehicleNo: t.vehicle_no ?? undefined,
+          driverName: t.driver_name ?? undefined,
+          toSiteName: toSiteName ? String(toSiteName) : String(t.to_site_id),
+          createdAt: String(t.created_at),
+          items: ((mv ?? []) as Row[]).map((r) => ({
+            assetCode: String(r.asset_code),
+            serial: r.serial ?? undefined,
+            barcode: r.barcode ?? undefined,
+            machineName: r.machine_name ?? undefined,
+          })),
+        },
+      };
+    } catch (e) {
+      if (isAuthError(e)) emitUnauthorized();
+      return { success: false, message: errMessage(e) };
+    }
+  }
+
+  /** orderId untuk satu baris Transfer (dari getTransfers/getPendingTransfersForSite) berdasarkan transferId item. */
+  public getOrderIdForTransfer(transferId: string): number | null {
+    return this.transferMeta.get(transferId)?.orderId ?? null;
+  }
+
   // ---------------------------------------------------------------- fitur yang belum tersedia (jujur, tanpa pura-pura)
   public generateDailyReport(siteId: string = 'ALL'): DailyReport {
     return {

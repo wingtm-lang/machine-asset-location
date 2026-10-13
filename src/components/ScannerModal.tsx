@@ -32,6 +32,16 @@ interface ScannerModalProps {
   captureLabel?: string;
   /** Mode awal saat modal dibuka. Bila kosong, memakai mode terakhir. */
   initialMode?: 'physical' | 'camera';
+  /**
+   * Mode "pindai terus-menerus" (dipakai Transfer Antar Site): modal tetap terbuka, tiap barcode yang
+   * terbaca dikirim ke pemanggil (tanpa cek database di sini), lalu kamera lanjut memindai.
+   * Kode yang sama diabaikan selama 4 detik agar tidak terhitung ganda.
+   */
+  onContinuousScan?: (code: string) => void;
+  /** Status terakhir yang ditampilkan di modal (diisi pemanggil setelah memproses kode). */
+  continuousStatus?: { type: 'success' | 'error'; text: string } | null;
+  /** Teks tombol penutup pada mode pindai terus-menerus, contoh: "Selesai (3 mesin)". */
+  doneLabel?: string;
 }
 
 export const ScannerModal: React.FC<ScannerModalProps> = ({
@@ -42,7 +52,15 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   onCapture,
   captureLabel,
   initialMode,
+  onContinuousScan,
+  continuousStatus,
+  doneLabel,
 }) => {
+  // Simpan callback terbaru di ref: loop kamera memegang closure lama, ref menjamin pemanggil selalu versi terbaru.
+  const onContinuousScanRef = useRef(onContinuousScan);
+  onContinuousScanRef.current = onContinuousScan;
+  const lastContinuous = useRef<{ code: string; at: number }>({ code: '', at: 0 });
+
   const { language, canAccessSite } = useAuth();
   const [mode, setMode] = useState<'physical' | 'camera'>('physical');
   const [inputValue, setInputValue] = useState('');
@@ -179,6 +197,20 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     setErrorMessage(null);
     const cleanCode = extractCode(scannedText);
 
+    // Mode pindai terus-menerus: serahkan kode mentah ke pemanggil, modal tetap terbuka.
+    if (onContinuousScanRef.current) {
+      const now = Date.now();
+      const last = lastContinuous.current;
+      if (!(last.code === cleanCode && now - last.at < 4000)) {
+        lastContinuous.current = { code: cleanCode, at: now };
+        onContinuousScanRef.current(cleanCode);
+      }
+      setTimeout(() => {
+        if (streamRef.current) animationFrameId.current = requestAnimationFrame(tickVideoScan);
+      }, 1200);
+      return;
+    }
+
     const { machine, searchTimeMs } = storageService.getMachineByCode(cleanCode);
     setSearchLatency(searchTimeMs);
 
@@ -251,6 +283,8 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               <p className="text-xs text-slate-500">
                 {onCapture
                   ? 'Hasil scan otomatis dimasukkan ke kolom Cari slot'
+                  : onContinuousScan
+                  ? 'Arahkan kamera ke barcode satu per satu. Mesin langsung masuk daftar.'
                   : mode === 'physical'
                   ? 'Siap menerima scan dari barcode gun 2D (QR Code)'
                   : 'Arahkan kamera ke QR Code label mesin'}
@@ -396,6 +430,35 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               )}
             </p>
           </form>
+
+          {/* STATUS MODE PINDAI TERUS-MENERUS */}
+          {onContinuousScan && (
+            <div className="space-y-2">
+              {continuousStatus && (
+                <div
+                  className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs animate-in fade-in ${
+                    continuousStatus.type === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div>{continuousStatus.text}</div>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  onClose();
+                }}
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+              >
+                {doneLabel ?? 'Selesai'}
+              </button>
+            </div>
+          )}
 
           {/* ERROR ALERT */}
           {errorMessage && (

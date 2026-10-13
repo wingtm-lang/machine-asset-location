@@ -28,6 +28,7 @@ import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 import { Machine, Transfer, SiteId } from '../types';
 import { getMachineLabel } from '../utils/machineName';
+import { ScannerModal } from '../components/ScannerModal'; // sesuaikan path bila file ada di folder lain
 
 // Paginasi riwayat tab "Transfer Terkirim"
 const OUTBOUND_PAGE_SIZE = 10;
@@ -79,6 +80,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [scanInput, setScanInput] = useState<string>('');
   const [scanError, setScanError] = useState<string | null>(null);
   const [recentlyAddedCode, setRecentlyAddedCode] = useState<string | null>(null);
+  // Pemindai kamera (pindai terus-menerus)
+  const [isCameraScanOpen, setIsCameraScanOpen] = useState<boolean>(false);
+  const [cameraScanStatus, setCameraScanStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Paste batch area states
   const [isPasteModeOpen, setIsPasteModeOpen] = useState<boolean>(false);
@@ -214,6 +218,27 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     setTimeout(() => {
       scanInputRef.current?.focus();
     }, 10);
+  };
+
+  // Satu barcode dari kamera: validasi dengan aturan yang sama seperti input scan, lalu tambahkan ke daftar.
+  const handleCameraScan = (code: string) => {
+    const res = validateMachineForTransfer(code, selectedBatchMachines);
+    if (res.valid) {
+      soundService.playSuccess();
+      setSelectedBatchMachines((prev) =>
+        prev.some((m) => m.assetCode === res.machine.assetCode) ? prev : [res.machine, ...prev]
+      );
+      setRecentlyAddedCode(res.machine.assetCode);
+      setScanError(null);
+      setTimeout(() => setRecentlyAddedCode(null), 2500);
+      setCameraScanStatus({
+        type: 'success',
+        text: `Ditambahkan: ${res.machine.assetCode} (${selectedBatchMachines.length + 1} mesin di daftar)`,
+      });
+    } else {
+      soundService.playError();
+      setCameraScanStatus({ type: 'error', text: res.error });
+    }
   };
 
   // Handle key down on scan input: intercept Enter key
@@ -675,6 +700,19 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 <label htmlFor="scan-transfer-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                   Scan Barcode / Kode Aset / Nomor Seri:
                 </label>
+                <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCameraScanStatus(null);
+                    setIsCameraScanOpen(true);
+                  }}
+                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-semibold flex items-center gap-1 min-h-[36px] px-2"
+                  aria-label="Buka pemindai kamera"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Scan kamera</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setIsPasteModeOpen((prev) => !prev)}
@@ -685,6 +723,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                   <span>{isPasteModeOpen ? 'Tutup Tempel Banyak' : 'Tempel banyak kode'}</span>
                   {isPasteModeOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
+                </div>
               </div>
 
               <div className="relative flex items-center">
@@ -1056,6 +1095,17 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Pemindai kamera: tiap barcode langsung masuk Daftar Mesin Siap Dikirim, kamera tetap terbuka */}
+      <ScannerModal
+        isOpen={isCameraScanOpen}
+        onClose={() => setIsCameraScanOpen(false)}
+        initialMode="camera"
+        captureLabel={`Scan mesin ke transfer (tujuan ${selectedToSite})`}
+        onContinuousScan={handleCameraScan}
+        continuousStatus={cameraScanStatus}
+        doneLabel={`Selesai (${selectedBatchMachines.length} mesin di daftar)`}
+      />
     </div>
   );
 };
