@@ -84,6 +84,20 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [isCameraScanOpen, setIsCameraScanOpen] = useState<boolean>(false);
   const [cameraScanStatus, setCameraScanStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Toast hasil scan (berhasil / gagal): muncul di atas modal kamera, hilang sendiri, disertai getar singkat di ponsel.
+  const [scanToast, setScanToast] = useState<{ id: number; type: 'success' | 'error'; text: string } | null>(null);
+  const showScanToast = (type: 'success' | 'error', text: string) => {
+    setScanToast({ id: Date.now(), type, text });
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate(type === 'success' ? 60 : [120, 60, 120]);
+    }
+  };
+  useEffect(() => {
+    if (!scanToast) return;
+    const timer = setTimeout(() => setScanToast((cur) => (cur?.id === scanToast.id ? null : cur)), 2200);
+    return () => clearTimeout(timer);
+  }, [scanToast]);
+
   // Paste batch area states
   const [isPasteModeOpen, setIsPasteModeOpen] = useState<boolean>(false);
   const [pasteInput, setPasteInput] = useState<string>('');
@@ -204,12 +218,14 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     const res = validateMachineForTransfer(raw, selectedBatchMachines);
     if (res.valid) {
       soundService.playSuccess();
+      showScanToast('success', `${res.machine.assetCode} ditambahkan (${selectedBatchMachines.length + 1} mesin)`);
       setSelectedBatchMachines((prev) => [res.machine, ...prev]);
       setRecentlyAddedCode(res.machine.assetCode);
       setScanError(null);
       setTimeout(() => setRecentlyAddedCode(null), 2500);
     } else {
       soundService.playError();
+      showScanToast('error', res.error);
       setScanError(res.error);
     }
 
@@ -231,12 +247,14 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       setRecentlyAddedCode(res.machine.assetCode);
       setScanError(null);
       setTimeout(() => setRecentlyAddedCode(null), 2500);
+      showScanToast('success', `${res.machine.assetCode} ditambahkan (${selectedBatchMachines.length + 1} mesin)`);
       setCameraScanStatus({
         type: 'success',
         text: `Ditambahkan: ${res.machine.assetCode} (${selectedBatchMachines.length + 1} mesin di daftar)`,
       });
     } else {
       soundService.playError();
+      showScanToast('error', res.error);
       setCameraScanStatus({ type: 'error', text: res.error });
     }
   };
@@ -1106,6 +1124,28 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         continuousStatus={cameraScanStatus}
         doneLabel={`Selesai (${selectedBatchMachines.length} mesin di daftar)`}
       />
+
+      {/* Toast hasil scan: z lebih tinggi dari modal kamera agar tetap terlihat saat kamera terbuka */}
+      {scanToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-2rem)] max-w-md pointer-events-none animate-in slide-in-from-top-2 fade-in duration-150">
+          <div
+            role="status"
+            aria-live="assertive"
+            className={`flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl border text-sm font-semibold text-white ${
+              scanToast.type === 'success'
+                ? 'bg-emerald-600 border-emerald-400'
+                : 'bg-rose-600 border-rose-400'
+            }`}
+          >
+            {scanToast.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
+            ) : (
+              <XCircle className="w-5 h-5 shrink-0" />
+            )}
+            <span className="leading-snug">{scanToast.text}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
