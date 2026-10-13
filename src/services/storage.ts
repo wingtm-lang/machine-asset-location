@@ -1001,10 +1001,10 @@ class StorageService {
     data?: import('./suratJalan').SuratJalanData;
   }> {
     try {
-      const [{ data: t, error: tErr }, { data: mv, error: mvErr }] = await Promise.all([
+      const [{ data: t, error: tErr }, { data: mv, error: mvErr }, { data: ti, error: tiErr }] = await Promise.all([
         supabase
           .from('transfers')
-          .select('transfer_no, vehicle_no, driver_name, created_at, to_site_id, sites:to_site_id(name)')
+          .select('transfer_no, vehicle_no, driver_name, created_at, created_by_nik, to_site_id, sites:to_site_id(name)')
           .eq('id', orderId)
           .maybeSingle(),
         supabase
@@ -1013,13 +1013,29 @@ class StorageService {
           .eq('transfer_id', orderId)
           .eq('movement_type', 'TRANSFER_OUT')
           .order('id', { ascending: true }),
+        // NIK penerima diambil dari transfer_items (bukan movements, yang tidak punya kolom ini),
+        // hanya item yang sudah RECEIVED.
+        supabase
+          .from('transfer_items')
+          .select('received_by_nik')
+          .eq('transfer_id', orderId)
+          .eq('status', 'RECEIVED'),
       ]);
       if (tErr) throw tErr;
       if (mvErr) throw mvErr;
+      if (tiErr) throw tiErr;
       if (!t) return { success: false, message: 'Transfer tidak ditemukan.' };
 
       const site = (t as Row).sites as Row | Row[] | null;
       const toSiteName = Array.isArray(site) ? site[0]?.name : site?.name;
+
+      // NIK penerima hanya dicetak bila SEMUA mesin yang sudah diterima dalam batch ini
+      // diterima oleh NIK yang sama; kalau campuran atau belum ada yang diterima, dikosongkan
+      // supaya diisi tangan saat serah terima fisik.
+      const receiverNiks = new Set(
+        ((ti ?? []) as Row[]).map((r) => r.received_by_nik).filter((nik): nik is string => Boolean(nik))
+      );
+      const receivedByNik = receiverNiks.size === 1 ? (Array.from(receiverNiks)[0] as string) : undefined;
 
       return {
         success: true,
@@ -1035,6 +1051,8 @@ class StorageService {
             barcode: r.barcode ?? undefined,
             machineName: r.machine_name ?? undefined,
           })),
+          sentByNik: String(t.created_by_nik ?? ''),
+          receivedByNik,
         },
       };
     } catch (e) {

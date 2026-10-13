@@ -21,6 +21,8 @@ import {
   Info,
   ChevronLeft,
   ChevronRight,
+  Printer,
+  Package,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { getTranslation } from '../services/translations';
@@ -29,9 +31,104 @@ import { soundService } from '../services/sound';
 import { Machine, Transfer, SiteId } from '../types';
 import { getMachineLabel } from '../utils/machineName';
 import { ScannerModal } from '../components/ScannerModal'; // sesuaikan path bila file ada di folder lain
+import { openSuratJalan } from '../services/suratJalan';
 
-// Paginasi riwayat tab "Transfer Terkirim"
+// Paginasi riwayat tab "Transfer Terkirim" (sekarang per-batch/order, bukan per-mesin)
 const OUTBOUND_PAGE_SIZE = 10;
+
+/** Satu kartu "Transfer Terkirim" = satu order/batch (transfer_no), berisi N mesin. */
+interface TransferBatch {
+  /** transfer_no — nomor surat jalan & identitas utama kartu */
+  batchId: string;
+  /** salah satu transferId anggota batch; dipakai utk resolve orderId (Surat Jalan) & aksi Batalkan */
+  representativeTransferId: string;
+  fromSite: string;
+  toSite: string;
+  sentAt: string;
+  sentBy: string;
+  receivedAt?: string;
+  receivedBy?: string;
+  machines: Transfer[];
+  counts: { inTransit: number; received: number; cancelled: number };
+}
+
+/** Kelompokkan daftar transfer per-mesin menjadi kartu per-batch (transfer_no). */
+function groupTransfersByBatch(items: Transfer[]): TransferBatch[] {
+  const map = new Map<string, TransferBatch>();
+
+  for (const t of items) {
+    // Fallback ke transferId sendiri bila data lama tidak punya batchId (transfer_no)
+    const key = (t as any).batchId || t.transferId;
+    let b = map.get(key);
+    if (!b) {
+      b = {
+        batchId: key,
+        representativeTransferId: t.transferId,
+        fromSite: t.fromSite,
+        toSite: t.toSite,
+        sentAt: t.sentAt,
+        sentBy: t.sentBy,
+        machines: [],
+        counts: { inTransit: 0, received: 0, cancelled: 0 },
+      };
+      map.set(key, b);
+    }
+
+    b.machines.push(t);
+
+    if (t.status === 'IN_TRANSIT') {
+      b.counts.inTransit++;
+    } else if (t.status === 'RECEIVED') {
+      b.counts.received++;
+      if (t.receivedAt && (!b.receivedAt || t.receivedAt > b.receivedAt)) {
+        b.receivedAt = t.receivedAt;
+        b.receivedBy = t.receivedBy;
+      }
+    } else if (t.status === 'CANCELLED') {
+      b.counts.cancelled++;
+    }
+
+    // Jam kirim & pengirim kartu mengikuti baris mesin yang paling awal dikirim
+    if (t.sentAt < b.sentAt) {
+      b.sentAt = t.sentAt;
+      b.sentBy = t.sentBy;
+      b.representativeTransferId = t.transferId;
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+}
+
+/** Label & warna status gabungan satu batch, berdasarkan status seluruh mesin anggotanya. */
+function getBatchStatusBadge(batch: TransferBatch): { label: string; className: string } {
+  const total = batch.machines.length;
+  const { inTransit, received, cancelled } = batch.counts;
+
+  if (cancelled === total) {
+    return {
+      label: 'DIBATALKAN',
+      className: 'bg-rose-50 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+    };
+  }
+  if (received === total) {
+    return {
+      label: 'DITERIMA',
+      className: 'bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+    };
+  }
+  if (inTransit === total) {
+    return {
+      label: 'DALAM PERJALANAN',
+      className: 'bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    };
+  }
+  // Status campuran: sebagian diterima/dibatalkan, sisanya masih jalan
+  const doneCount = received + cancelled;
+  return {
+    label: `SEBAGIAN SELESAI (${doneCount}/${total})`,
+    className: 'bg-sky-50 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border-sky-200 dark:border-sky-800',
+  };
+}
 
 /** Daftar tombol halaman, contoh: 1 … 4 5 6 … 12 */
 function buildPageList(current: number, total: number): (number | '…')[] {
@@ -70,6 +167,8 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [isSending, setIsSending] = useState(false);
   const [isReceiving, setIsReceiving] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [printingId, setPrintingId] = useState<string | null>(null);
+  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
 
   // Batch transfer list
   const [selectedBatchMachines, setSelectedBatchMachines] = useState<Machine[]>(() => {
@@ -80,6 +179,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [scanInput, setScanInput] = useState<string>('');
   const [scanError, setScanError] = useState<string | null>(null);
   const [recentlyAddedCode, setRecentlyAddedCode] = useState<string | null>(null);
+
   // Pemindai kamera (pindai terus-menerus)
   const [isCameraScanOpen, setIsCameraScanOpen] = useState<boolean>(false);
   const [cameraScanStatus, setCameraScanStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -157,13 +257,18 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     });
   }, [transfers, currentUser]);
 
-  // Paginasi: halaman dijepit agar tetap valid bila jumlah transfer berkurang
-  const outboundTotalPages = Math.max(1, Math.ceil(outboundTransfers.length / OUTBOUND_PAGE_SIZE));
+  // Kelompokkan riwayat terkirim per-batch (transfer_no) -> satu kartu per pengiriman
+  const outboundBatches = useMemo(() => {
+    return groupTransfersByBatch(outboundTransfers);
+  }, [outboundTransfers]);
+
+  // Paginasi per-batch: halaman dijepit agar tetap valid bila jumlah batch berkurang
+  const outboundTotalPages = Math.max(1, Math.ceil(outboundBatches.length / OUTBOUND_PAGE_SIZE));
   const safeOutboundPage = Math.min(outboundPage, outboundTotalPages);
-  const pagedOutboundTransfers = useMemo(() => {
+  const pagedOutboundBatches = useMemo(() => {
     const start = (safeOutboundPage - 1) * OUTBOUND_PAGE_SIZE;
-    return outboundTransfers.slice(start, start + OUTBOUND_PAGE_SIZE);
-  }, [outboundTransfers, safeOutboundPage]);
+    return outboundBatches.slice(start, start + OUTBOUND_PAGE_SIZE);
+  }, [outboundBatches, safeOutboundPage]);
 
   // Available destination locations when receiving
   const destinationLocations = useMemo(() => {
@@ -241,13 +346,13 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     const res = validateMachineForTransfer(code, selectedBatchMachines);
     if (res.valid) {
       soundService.playSuccess();
+      showScanToast('success', `${res.machine.assetCode} ditambahkan (${selectedBatchMachines.length + 1} mesin)`);
       setSelectedBatchMachines((prev) =>
         prev.some((m) => m.assetCode === res.machine.assetCode) ? prev : [res.machine, ...prev]
       );
       setRecentlyAddedCode(res.machine.assetCode);
       setScanError(null);
       setTimeout(() => setRecentlyAddedCode(null), 2500);
-      showScanToast('success', `${res.machine.assetCode} ditambahkan (${selectedBatchMachines.length + 1} mesin)`);
       setCameraScanStatus({
         type: 'success',
         text: `Ditambahkan: ${res.machine.assetCode} (${selectedBatchMachines.length + 1} mesin di daftar)`,
@@ -298,8 +403,15 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
 
     if (addedCount > 0) {
       soundService.playSuccess();
+      showScanToast(
+        'success',
+        skippedItems.length > 0
+          ? `${addedCount} mesin ditambahkan, ${skippedItems.length} dilewati`
+          : `${addedCount} mesin ditambahkan`
+      );
     } else {
       soundService.playError();
+      showScanToast('error', `Tidak ada mesin yang ditambahkan (${skippedItems.length} dilewati)`);
     }
 
     if (skippedItems.length > 0) {
@@ -419,6 +531,32 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       setFeedback({ type: 'error', message: err.message || 'Gagal membatalkan transfer.' });
     } finally {
       setCancellingId(null);
+    }
+  };
+
+  // Cetak Surat Jalan untuk satu batch/order (memanfaatkan salah satu transferId anggotanya)
+  const handlePrintSuratJalan = async (transferId: string) => {
+    if (printingId) return;
+    setPrintingId(transferId);
+    try {
+      const orderId = storageService.getOrderIdForTransfer(transferId);
+      if (orderId == null) {
+        soundService.playError();
+        setFeedback({ type: 'error', message: 'Data transfer ini tidak ditemukan. Segarkan halaman lalu coba lagi.' });
+        return;
+      }
+      const res = await storageService.getSuratJalanData(orderId);
+      if (res.success && res.data) {
+        openSuratJalan(res.data);
+      } else {
+        soundService.playError();
+        setFeedback({ type: 'error', message: res.message || 'Gagal menyiapkan surat jalan.' });
+      }
+    } catch (err: any) {
+      soundService.playError();
+      setFeedback({ type: 'error', message: err.message || 'Gagal menyiapkan surat jalan.' });
+    } finally {
+      setPrintingId(null);
     }
   };
 
@@ -581,65 +719,128 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             <span>Riwayat Transfer Keluar dari Site Anda</span>
           </h2>
 
-          <div className="space-y-3">
-            {pagedOutboundTransfers.map((t) => (
-              <div
-                key={t.transferId}
-                className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-sm">{t.assetCode}</span>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                        t.status === 'IN_TRANSIT'
-                          ? 'bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                          : t.status === 'RECEIVED'
-                          ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                          : 'bg-rose-50 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-                      }`}
-                    >
-                      {t.status}
-                    </span>
-                  </div>
+          {outboundBatches.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+              Belum ada transfer yang dikirim dari site Anda.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pagedOutboundBatches.map((batch) => {
+                const badge = getBatchStatusBadge(batch);
+                const isExpanded = expandedBatchId === batch.batchId;
+                const canCancel = batch.counts.inTransit > 0;
 
-                  <div className="text-slate-700 dark:text-slate-300">
-                    Dari: <span className="font-bold text-amber-700 dark:text-amber-400">{t.fromSite}</span> → Ke:{' '}
-                    <span className="font-bold text-emerald-700 dark:text-emerald-400">{t.toSite}</span>
-                  </div>
+                return (
+                  <div
+                    key={batch.batchId}
+                    className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs overflow-hidden"
+                  >
+                    <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Package className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                          <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-sm">
+                            {batch.batchId}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${badge.className}`}>
+                            {badge.label}
+                          </span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                            {batch.machines.length} mesin
+                          </span>
+                        </div>
 
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Dikirim: {new Date(t.sentAt).toLocaleString('id-ID')} ({t.sentBy})
-                    {t.receivedAt && (
-                      <span> • Diterima: {new Date(t.receivedAt).toLocaleString('id-ID')} ({t.receivedBy})</span>
+                        <div className="text-slate-700 dark:text-slate-300">
+                          Dari: <span className="font-bold text-amber-700 dark:text-amber-400">{batch.fromSite}</span> → Ke:{' '}
+                          <span className="font-bold text-emerald-700 dark:text-emerald-400">{batch.toSite}</span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Dikirim: {new Date(batch.sentAt).toLocaleString('id-ID')} ({batch.sentBy})
+                          {batch.receivedAt && (
+                            <span> • Diterima terakhir: {new Date(batch.receivedAt).toLocaleString('id-ID')} ({batch.receivedBy})</span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setExpandedBatchId(isExpanded ? null : batch.batchId)}
+                          className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-semibold flex items-center gap-1 min-h-[28px] cursor-pointer"
+                          aria-label={isExpanded ? 'Sembunyikan daftar mesin' : 'Tampilkan daftar mesin'}
+                        >
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          <span>{isExpanded ? 'Sembunyikan daftar mesin' : 'Lihat daftar mesin'}</span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSuratJalan(batch.representativeTransferId)}
+                          disabled={printingId === batch.representativeTransferId}
+                          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors min-h-[40px] cursor-pointer"
+                          aria-label={`Cetak surat jalan untuk batch ${batch.batchId}`}
+                          title="Mencetak satu manifest lengkap untuk seluruh mesin dalam pengiriman ini"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>{printingId === batch.representativeTransferId ? 'Menyiapkan...' : 'Surat Jalan'}</span>
+                        </button>
+
+                        {canCancel && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelTransfer(batch.representativeTransferId)}
+                            disabled={cancellingId === batch.representativeTransferId}
+                            className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900 disabled:opacity-50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors min-h-[40px] cursor-pointer"
+                            aria-label={`Batalkan batch ${batch.batchId}`}
+                            title="Membatalkan semua mesin yang masih Dalam Perjalanan pada batch ini"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>
+                              {cancellingId === batch.representativeTransferId ? 'Membatalkan...' : getTranslation('cancel_transfer', language)}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+                        {batch.machines.map((m) => (
+                          <div
+                            key={m.transferId}
+                            className="px-4 py-2 flex items-center justify-between gap-2 text-[11px]"
+                          >
+                            <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">{m.assetCode}</span>
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                m.status === 'IN_TRANSIT'
+                                  ? 'bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                                  : m.status === 'RECEIVED'
+                                  ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                  : 'bg-rose-50 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                              }`}
+                            >
+                              {m.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
 
-                {t.status === 'IN_TRANSIT' && (
-                  <button
-                    type="button"
-                    onClick={() => handleCancelTransfer(t.transferId)}
-                    disabled={cancellingId === t.transferId}
-                    className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900 disabled:opacity-50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto transition-colors min-h-[40px] cursor-pointer"
-                    aria-label={`Batalkan transfer ${t.transferId}`}
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    <span>{cancellingId === t.transferId ? 'Membatalkan...' : getTranslation('cancel_transfer', language)}</span>
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {outboundTransfers.length > OUTBOUND_PAGE_SIZE && (
+          {outboundBatches.length > OUTBOUND_PAGE_SIZE && (
             <nav
               className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-xs"
               aria-label="Paginasi riwayat transfer terkirim"
             >
               <span className="text-slate-500 dark:text-slate-400">
                 Menampilkan {(safeOutboundPage - 1) * OUTBOUND_PAGE_SIZE + 1}-
-                {Math.min(safeOutboundPage * OUTBOUND_PAGE_SIZE, outboundTransfers.length)} dari {outboundTransfers.length} transfer
+                {Math.min(safeOutboundPage * OUTBOUND_PAGE_SIZE, outboundBatches.length)} dari {outboundBatches.length} batch pengiriman
               </span>
               <div className="flex flex-wrap items-center justify-center gap-1">
                 <button
