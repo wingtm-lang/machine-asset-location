@@ -1,20 +1,20 @@
 /**
  * PT.WINNERS Machine Asset Location Tracker - Data Types
  */
-
+ 
 export type SiteId = 'PW1' | 'PW2' | 'PW3' | 'WH2' | 'SW' | 'QA' | string;
-
+ 
 export type SiteType = 'FACTORY' | 'WAREHOUSE' | 'LAB' | 'SITE';
-
+ 
 export interface Site {
   siteId: SiteId;
   name: string;
   type: SiteType;
   active: boolean;
 }
-
+ 
 export type LocationType = 'LINE' | 'LINE_EXTRA' | 'GUDANG' | 'UNASSIGNED' | 'RACK_SLOT' | 'MAIN';
-
+ 
 export interface Location {
   locationId: string; // e.g. 'PW1-L01', 'WH2-R1-1A', 'SW-MAIN'
   siteId: SiteId;
@@ -27,16 +27,16 @@ export interface Location {
   active: boolean;
   sortOrder: number;
 }
-
+ 
 export interface Rack {
   siteId: 'WH2' | string;
   rackNo: number;
   columnCount: number;
   active: boolean;
 }
-
+ 
 export type MachineStatus = 'ACTIVE' | 'BROKEN' | 'IN_REPAIR' | 'LOANED' | 'SOLD' | 'IN_TRANSIT';
-
+ 
 export interface Machine {
   assetCode: string; // e.g. 'IDN-8-2009-1396'
   barcode: string;   // 12-digit e.g. '000000066145'
@@ -63,7 +63,7 @@ export interface Machine {
   updatedBy: string;
   notes?: string;
 }
-
+ 
 export interface MachineListFilter {
   status?: string;     // ALL | ACTIVE | IN_TRANSIT | IN_REPAIR | BROKEN | LOANED | SOLD | BROKEN_REPAIR
   site?: string;       // ALL | PW1 | ...
@@ -71,9 +71,9 @@ export interface MachineListFilter {
   manufacturer?: string;
   unassigned?: boolean;
 }
-
+ 
 export type MovementType = 'MOVE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'OPNAME_FIX' | 'UNDO' | 'ADMIN_FIX';
-
+ 
 export interface Movement {
   movementId: string;
   timestamp: string;
@@ -88,9 +88,9 @@ export interface Movement {
   reason?: string;
   byUser: string;
 }
-
+ 
 export type TransferStatus = 'IN_TRANSIT' | 'RECEIVED' | 'CANCELLED';
-
+ 
 export interface Transfer {
   transferId: string;
   batchId?: string;
@@ -104,9 +104,13 @@ export interface Transfer {
   receivedBy?: string;
   toLocation?: string;
   note?: string;
+  /** Catatan Pengirim per mesin (diisi saat kirim; transfer_items.sender_note) */
+  senderNote?: string;
+  /** Catatan Penerima per mesin (diisi saat terima; transfer_items.receiver_note) */
+  receiverNote?: string;
   overdueAlertSent?: boolean;
 }
-
+ 
 export interface StatusLog {
   logId: string;
   timestamp: string;
@@ -118,9 +122,9 @@ export interface StatusLog {
   loanTo?: string;
   loanDueDate?: string;
 }
-
+ 
 export type OpnameResult = 'MATCH' | 'MISSING' | 'MISPLACED_SAME_SITE' | 'MISPLACED_OTHER_SITE' | 'UNKNOWN_BARCODE';
-
+ 
 export interface OpnameSession {
   sessionId: string;
   week: string; // e.g. '2026-W39'
@@ -136,7 +140,7 @@ export interface OpnameSession {
   misplaced: number;
   status: 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 }
-
+ 
 export interface OpnameItem {
   sessionId: string;
   assetCode: string;
@@ -148,11 +152,11 @@ export interface OpnameItem {
   scannedAt: string;
   resolution?: string; // e.g. 'MOVED_HERE', 'REPORTED', 'IGNORED'
 }
-
+ 
 export type AuthorityRole = 'admin master' | 'all sites' | 'PW1' | 'PW2' | 'PW3' | string;
-
+ 
 export type UserRole = 'Admin' | 'Mechanic' | 'Production Support' | 'Viewer' | AuthorityRole;
-
+ 
 export interface User {
   username: string; // NIK
   displayName: string; // Nama
@@ -172,14 +176,14 @@ export interface User {
   mustChangePassword?: boolean;
   lastLogin?: string;
 }
-
+ 
 export interface ReportRecipient {
   email: string;
   siteId: string; // 'ALL' or specific Site ID
   language: 'id' | 'en';
   active: boolean;
 }
-
+ 
 export interface DailyReport {
   reportId: string;
   date: string; // YYYY-MM-DD
@@ -197,7 +201,7 @@ export interface DailyReport {
     opnameMisplacedCount: number;
   };
 }
-
+ 
 export interface AuditLog {
   id: string;
   timestamp: string;
@@ -205,11 +209,11 @@ export interface AuditLog {
   action: string;
   detail: string;
 }
-
+ 
 export type ThemePreset = 'sky_cyan' | 'sage_emerald' | 'dark_slate' | 'clean_light' | 'midnight_navy';
 export type NavLayoutStyle = 'sidebar' | 'topbar';
 export type AccentColor = 'emerald' | 'teal' | 'indigo' | 'blue' | 'amber';
-
+ 
 export interface AppSettings {
   dailyReportTime: string; // '16:30'
   transferOverdueDays: number; // 3
@@ -223,7 +227,7 @@ export interface AppSettings {
   accentColor?: AccentColor; // 'emerald'
   cardRadius?: string; // 'rounded-2xl' | 'rounded-3xl'
 }
-
+ 
 export interface TranslationItem {
   key: string;
   id: string;

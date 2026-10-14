@@ -402,7 +402,7 @@ class StorageService {
       supabase
         .from('transfer_items')
         .select(
-          'id, transfer_id, status, to_location_id, received_at, received_by_nik, cancelled_at, cancelled_by_nik, asset_code, ' +
+          'id, transfer_id, status, to_location_id, received_at, received_by_nik, cancelled_at, cancelled_by_nik, asset_code, sender_note, receiver_note, ' +
             'transfers(transfer_no, from_site_id, to_site_id, note, created_at, created_by_nik)'
         )
         .order('id', { ascending: false })
@@ -428,6 +428,8 @@ class StorageService {
         receivedBy: r.received_by_nik ?? r.cancelled_by_nik ?? undefined,
         toLocation: r.to_location_id ?? undefined,
         note: t.note ?? undefined,
+        senderNote: r.sender_note ?? undefined,
+        receiverNote: r.receiver_note ?? undefined,
       });
     }
     this.transfers = list;
@@ -750,23 +752,37 @@ class StorageService {
     vehicleNo?: string;
     driverName?: string;
     note?: string;
+    /** Catatan Pengirim opsional per mesin (tersimpan di transfer_items.sender_note), kunci = assetCode. */
+    itemNotes?: Record<string, string>;
   }): Promise<{
     success: boolean;
     message: string;
     count: number;
+    /** Nomor TRF yang dibuat server (hanya bila berhasil). */
+    transferNo?: string;
     skipped?: { code: string; reason: 'NOT_FOUND' | 'NO_ACCESS' | 'PENDING' | 'SOLD' | 'SAME_SITE'; assetCode?: string }[];
   }> {
+    const itemNotesList = params.assetCodes
+      .map((code) => ({ asset_code: code, note: params.itemNotes?.[code]?.trim() || null }))
+      .filter((it) => it.note !== null);
     const res = await this.rpc('send_transfer', {
       p_asset_codes: params.assetCodes,
       p_to_site: params.toSite,
       p_note: params.note ? params.note : null,
       p_vehicle_no: params.vehicleNo ? params.vehicleNo : null,
       p_driver_name: params.driverName ? params.driverName : null,
+      p_item_notes: itemNotesList.length > 0 ? itemNotesList : null,
       p_request_id: uuid(),
     });
     if (!res.success) return { success: false, message: res.message, count: 0, skipped: [] };
     await this.afterMutation(params.assetCodes);
-    return { success: true, message: res.message, count: Number(res.data.count ?? params.assetCodes.length), skipped: [] };
+    return {
+      success: true,
+      message: res.message,
+      count: Number(res.data.count ?? params.assetCodes.length),
+      transferNo: res.data.transfer_no ? String(res.data.transfer_no) : undefined,
+      skipped: [],
+    };
   }
 
   public async receiveTransfer(params: {
@@ -774,13 +790,17 @@ class StorageService {
     toLocationId: string;
     receivedBy: string;
     userSiteAccess: string[];
+    /** Catatan Penerima opsional (kondisi mesin saat tiba), tersimpan di transfer_items.receiver_note. */
+    receiverNote?: string;
   }): Promise<{ success: boolean; message: string }> {
     const meta = this.transferMeta.get(params.transferId);
     if (!meta) return { success: false, message: 'Transfer tidak ditemukan. Muat ulang data lalu coba lagi.' };
+    const receiverNote = params.receiverNote?.trim();
     const res = await this.rpc('receive_transfer', {
       p_transfer_id: meta.orderId,
       p_to_location_id: params.toLocationId,
       p_asset_codes: [meta.assetCode],
+      p_item_notes: receiverNote ? [{ asset_code: meta.assetCode, note: receiverNote }] : null,
       p_request_id: uuid(),
     });
     if (!res.success) return { success: false, message: res.message };
@@ -1004,7 +1024,7 @@ class StorageService {
       const [{ data: t, error: tErr }, { data: mv, error: mvErr }, { data: ti, error: tiErr }] = await Promise.all([
         supabase
           .from('transfers')
-          .select('transfer_no, vehicle_no, driver_name, created_at, created_by_nik, to_site_id, sites:to_site_id(name)')
+          .select('transfer_no, vehicle_no, driver_name, created_at, created_by_nik, from_site_id, to_site_id, sites:to_site_id(name), from_site:from_site_id(name)')
           .eq('id', orderId)
           .maybeSingle(),
         supabase
@@ -1013,13 +1033,11 @@ class StorageService {
           .eq('transfer_id', orderId)
           .eq('movement_type', 'TRANSFER_OUT')
           .order('id', { ascending: true }),
-        // NIK penerima diambil dari transfer_items (bukan movements, yang tidak punya kolom ini),
-        // hanya item yang sudah RECEIVED.
+        // Catatan pengirim/penerima + NIK penerima per mesin ada di transfer_items (movements tidak punya kolom ini).
         supabase
           .from('transfer_items')
-          .select('received_by_nik')
-          .eq('transfer_id', orderId)
-          .eq('status', 'RECEIVED'),
+          .select('asset_code, status, sender_note, receiver_note, received_by_nik')
+          .eq('transfer_id', orderId),
       ]);
       if (tErr) throw tErr;
       if (mvErr) throw mvErr;
@@ -1028,12 +1046,44 @@ class StorageService {
 
       const site = (t as Row).sites as Row | Row[] | null;
       const toSiteName = Array.isArray(site) ? site[0]?.name : site?.name;
+      const fromSite = (t as Row).from_site as Row | Row[] | null;
+      const fromSiteLabel = Array.isArray(fromSite) ? fromSite[0]?.name : fromSite?.name;
+
+      // Nama profil penandatangan (lewat RPC SECURITY DEFINER). Gagal/belum ada fungsinya -> tanpa nama
+      // (surat jalan tetap tercetak; pengirim jatuh ke NIK, penerima dikosongkan).
+      let sentByName: string | undefined;
+      let receivedByName: string | undefined;
+      try {
+        const { data: sg, error: sgErr } = await supabase.rpc('get_transfer_signers', { p_transfer_id: orderId });
+        const sgRow = (sg ?? {}) as Row;
+        if (!sgErr && sgRow.success === true) {
+          sentByName = sgRow.sender_name ? String(sgRow.sender_name) : undefined;
+          const recv = Array.isArray(sgRow.receivers) ? (sgRow.receivers as Row[]) : [];
+          if (recv.length === 1 && recv[0].name) receivedByName = String(recv[0].name);
+        }
+      } catch {
+        /* abaikan: cetak tanpa nama */
+      }
 
       // NIK penerima hanya dicetak bila SEMUA mesin yang sudah diterima dalam batch ini
       // diterima oleh NIK yang sama; kalau campuran atau belum ada yang diterima, dikosongkan
       // supaya diisi tangan saat serah terima fisik.
+      const tiRows = (ti ?? []) as Row[];
+
+      // Transfer yang dibatalkan tidak boleh punya surat jalan: bila SEMUA mesin dibatalkan -> tolak.
+      // Bila hanya sebagian dibatalkan, mesin yang dibatalkan dikeluarkan dari manifest.
+      if (tiRows.length > 0 && tiRows.every((r) => r.status === 'CANCELLED')) {
+        return { success: false, message: 'Transfer ini dibatalkan, surat jalan tidak tersedia.' };
+      }
+      const cancelledAssets = new Set(tiRows.filter((r) => r.status === 'CANCELLED').map((r) => String(r.asset_code)));
+
+      const notesByAsset = new Map<string, Row>();
+      for (const r of tiRows) notesByAsset.set(String(r.asset_code), r);
       const receiverNiks = new Set(
-        ((ti ?? []) as Row[]).map((r) => r.received_by_nik).filter((nik): nik is string => Boolean(nik))
+        tiRows
+          .filter((r) => r.status === 'RECEIVED')
+          .map((r) => r.received_by_nik)
+          .filter((nik): nik is string => Boolean(nik))
       );
       const receivedByNik = receiverNiks.size === 1 ? (Array.from(receiverNiks)[0] as string) : undefined;
 
@@ -1044,15 +1094,23 @@ class StorageService {
           vehicleNo: t.vehicle_no ?? undefined,
           driverName: t.driver_name ?? undefined,
           toSiteName: toSiteName ? String(toSiteName) : String(t.to_site_id),
+          fromSiteName: fromSiteLabel ? String(fromSiteLabel) : String(t.from_site_id ?? ''),
           createdAt: String(t.created_at),
-          items: ((mv ?? []) as Row[]).map((r) => ({
-            assetCode: String(r.asset_code),
-            serial: r.serial ?? undefined,
-            barcode: r.barcode ?? undefined,
-            machineName: r.machine_name ?? undefined,
-          })),
+          items: ((mv ?? []) as Row[]).filter((r) => !cancelledAssets.has(String(r.asset_code))).map((r) => {
+            const n = notesByAsset.get(String(r.asset_code));
+            return {
+              assetCode: String(r.asset_code),
+              serial: r.serial ?? undefined,
+              barcode: r.barcode ?? undefined,
+              machineName: r.machine_name ?? undefined,
+              note: n?.sender_note ?? undefined,
+              receiverNote: n?.receiver_note ?? undefined,
+            };
+          }),
           sentByNik: String(t.created_by_nik ?? ''),
+          sentByName,
           receivedByNik,
+          receivedByName,
         },
       };
     } catch (e) {

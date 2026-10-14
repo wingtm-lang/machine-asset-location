@@ -33,6 +33,18 @@ import { getMachineLabel } from '../utils/machineName';
 import { ScannerModal } from '../components/ScannerModal'; // sesuaikan path bila file ada di folder lain
 import { openSuratJalan } from '../services/suratJalan';
 
+// Warna lencana per site untuk mode multi-site (urutan mengikuti site yang muncul di daftar, A-Z)
+const SITE_BADGE_CLASSES = [
+  'bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-300 dark:border-sky-700',
+  'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700',
+  'bg-violet-100 dark:bg-violet-950 text-violet-800 dark:text-violet-300 border border-violet-300 dark:border-violet-700',
+  'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700',
+  'bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 border border-teal-300 dark:border-teal-700',
+  'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700',
+];
+const NEUTRAL_SITE_BADGE =
+  'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200';
+
 // Paginasi riwayat tab "Transfer Terkirim" (sekarang per-batch/order, bukan per-mesin)
 const OUTBOUND_PAGE_SIZE = 10;
 
@@ -152,7 +164,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   batchMachines,
   onSelectMachine,
 }) => {
-  const { currentUser, language, canAccessSite } = useAuth();
+  const { currentUser, language, canAccessSite, canPerformAction } = useAuth();
   const sites = storageService.getSites();
   const allMachines = storageService.getAllMachines();
 
@@ -174,6 +186,35 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [selectedBatchMachines, setSelectedBatchMachines] = useState<Machine[]>(() => {
     return batchMachines && batchMachines.length > 0 ? [...batchMachines] : [];
   });
+  // Catatan Pengirim opsional per mesin -> diisi saat kirim, tersimpan ke DB (transfer_items.sender_note)
+  // lewat sendTransfer, sehingga sudah terekam otomatis saat surat jalan dicetak (tidak perlu ketik ulang).
+  const [batchNotes, setBatchNotes] = useState<Record<string, string>>({});
+
+  // Mode multi-site: HANYA admin. Bila nyala, mesin dari beberapa site boleh satu daftar dan dikirim sebagai
+  // satu transfer per site asal (tiap transfer tetap divalidasi penuh oleh server). Non-admin selalu mati.
+  const isAdminUser = canPerformAction('ADMIN');
+  const [multiSiteMode, setMultiSiteMode] = useState(false);
+  const multiSite = isAdminUser && multiSiteMode;
+  const siteGroups = useMemo(() => {
+    const map = new Map<string, Machine[]>();
+    for (const m of selectedBatchMachines) {
+      const key = String(m.siteId);
+      const arr = map.get(key);
+      if (arr) arr.push(m);
+      else map.set(key, [m]);
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([siteId, machines]) => ({ siteId, machines }));
+  }, [selectedBatchMachines]);
+  const siteBadgeClass = (siteId: string): string => {
+    if (!multiSite) return NEUTRAL_SITE_BADGE;
+    const idx = siteGroups.findIndex((g) => g.siteId === String(siteId));
+    return SITE_BADGE_CLASSES[(idx < 0 ? 0 : idx) % SITE_BADGE_CLASSES.length];
+  };
+  const multiSiteSummary = `${selectedBatchMachines.length} mesin dari ${siteGroups.length} site: ${siteGroups
+    .map((g) => `${g.siteId} (${g.machines.length})`)
+    .join(', ')} menjadi ${siteGroups.length} transfer`;
 
   // Scan input states
   const [scanInput, setScanInput] = useState<string>('');
@@ -185,16 +226,16 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const [cameraScanStatus, setCameraScanStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Toast hasil scan (berhasil / gagal): muncul di atas modal kamera, hilang sendiri, disertai getar singkat di ponsel.
-  const [scanToast, setScanToast] = useState<{ id: number; type: 'success' | 'error'; text: string } | null>(null);
-  const showScanToast = (type: 'success' | 'error', text: string) => {
-    setScanToast({ id: Date.now(), type, text });
+  const [scanToast, setScanToast] = useState<{ id: number; type: 'success' | 'error'; text: string; ms: number } | null>(null);
+  const showScanToast = (type: 'success' | 'error', text: string, ms = 2200) => {
+    setScanToast({ id: Date.now(), type, text, ms });
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       navigator.vibrate(type === 'success' ? 60 : [120, 60, 120]);
     }
   };
   useEffect(() => {
     if (!scanToast) return;
-    const timer = setTimeout(() => setScanToast((cur) => (cur?.id === scanToast.id ? null : cur)), 2200);
+    const timer = setTimeout(() => setScanToast((cur) => (cur?.id === scanToast.id ? null : cur)), scanToast.ms);
     return () => clearTimeout(timer);
   }, [scanToast]);
 
@@ -207,6 +248,8 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
 
   // Receive Modal states
   const [receivingTransfer, setReceivingTransfer] = useState<Transfer | null>(null);
+  // Catatan Penerima (kondisi mesin saat tiba), dikirim bersama konfirmasi terima
+  const [receiveNote, setReceiveNote] = useState('');
   const [receiveTargetLocationId, setReceiveTargetLocationId] = useState<string>('');
 
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -433,11 +476,23 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   // Remove single machine from batch list
   const handleRemoveFromBatch = (assetCode: string) => {
     setSelectedBatchMachines((prev) => prev.filter((m) => m.assetCode !== assetCode));
+    setBatchNotes((prev) => {
+      if (!(assetCode in prev)) return prev;
+      const next = { ...prev };
+      delete next[assetCode];
+      return next;
+    });
+  };
+
+  // Ubah catatan ("Keterangan") satu mesin dalam daftar batch
+  const handleBatchNoteChange = (assetCode: string, note: string) => {
+    setBatchNotes((prev) => ({ ...prev, [assetCode]: note }));
   };
 
   // Clear all machines from batch list
   const handleClearBatch = () => {
     setSelectedBatchMachines([]);
+    setBatchNotes({});
     setScanError(null);
     setPasteSummary(null);
     setTimeout(() => {
@@ -451,29 +506,91 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     setFeedback(null);
     if (!currentUser || isSending || selectedBatchMachines.length === 0) return;
 
+    // Mode multi-site mati: perilaku lama, mesin dari >1 site ditolak (server juga menolak: MIXED_SITES).
+    if (!multiSite && siteGroups.length > 1) {
+      const msg = `Semua mesin dalam satu transfer harus berasal dari satu site (ditemukan: ${siteGroups
+        .map((g) => g.siteId)
+        .join(', ')}).`;
+      soundService.playError();
+      setFeedback({ type: 'error', message: msg });
+      showScanToast('error', msg, 4000);
+      return;
+    }
+
     setIsSending(true);
     try {
-      const res = await storageService.sendTransfer({
-        assetCodes: selectedBatchMachines.map((m) => m.assetCode),
-        toSite: selectedToSite,
-        sentBy: currentUser.username,
-        userSiteAccess: currentUser.siteAccess,
-        vehicleNo,
-        driverName,
-        note: transferNote,
-      });
+      // Mode multi-site nyala: satu panggilan send_transfer per site asal. Mati: satu panggilan untuk semua.
+      const groups = multiSite ? siteGroups : [{ siteId: siteGroups[0]?.siteId ?? '', machines: selectedBatchMachines }];
+      const sent: { siteId: string; count: number; transferNo?: string; message: string; codes: string[] }[] = [];
+      const failed: { siteId: string; count: number; message: string }[] = [];
 
-      if (res.success) {
+      for (const g of groups) {
+        const codes = g.machines.map((m) => m.assetCode);
+        try {
+          const res = await storageService.sendTransfer({
+            assetCodes: codes,
+            toSite: selectedToSite,
+            sentBy: currentUser.username,
+            userSiteAccess: currentUser.siteAccess,
+            vehicleNo,
+            driverName,
+            note: transferNote,
+            itemNotes: batchNotes,
+          });
+          if (res.success) {
+            sent.push({ siteId: g.siteId, count: res.count, transferNo: res.transferNo, message: res.message, codes });
+          } else {
+            failed.push({ siteId: g.siteId, count: codes.length, message: res.message });
+          }
+        } catch (err: any) {
+          failed.push({ siteId: g.siteId, count: codes.length, message: err?.message || 'Gagal mengirim transfer.' });
+        }
+      }
+
+      // Pesan hasil: satu transfer -> pesan server apa adanya; multi-site -> semua nomor TRF per site.
+      let message: string;
+      if (groups.length === 1) {
+        message = sent[0]?.message ?? failed[0]?.message ?? 'Gagal mengirim transfer.';
+      } else {
+        const totalSent = sent.reduce((n, r) => n + r.count, 0);
+        const lines: string[] = [];
+        if (sent.length > 0) {
+          lines.push(
+            `${totalSent} mesin terkirim ke ${selectedToSite} dalam ${sent.length} transfer: ` +
+              sent.map((r) => `${r.siteId} (${r.count}) -> ${r.transferNo ?? 'TRF'}`).join(', ') +
+              '.'
+          );
+        }
+        for (const f of failed) {
+          lines.push(`GAGAL ${f.siteId} (${f.count} mesin): ${f.message}`);
+        }
+        message = lines.join('\n');
+      }
+
+      if (failed.length === 0) {
         soundService.playSuccess();
-        setFeedback({ type: 'success', message: res.message });
+        setFeedback({ type: 'success', message });
+        showScanToast('success', message, groups.length > 1 ? 7000 : 2200);
         setSelectedBatchMachines([]);
+        setBatchNotes({});
         setVehicleNo('');
         setDriverName('');
         setTransferNote('');
         setActiveTab('outbound');
       } else {
         soundService.playError();
-        setFeedback({ type: 'error', message: res.message });
+        setFeedback({ type: 'error', message });
+        if (groups.length > 1) showScanToast('error', message, 9000);
+        if (sent.length > 0) {
+          // Sebagian sudah terkirim: keluarkan dari daftar, sisakan yang gagal supaya bisa dicoba lagi.
+          const sentCodes = new Set(sent.flatMap((r) => r.codes));
+          setSelectedBatchMachines((prev) => prev.filter((m) => !sentCodes.has(m.assetCode)));
+          setBatchNotes((prev) => {
+            const next = { ...prev };
+            sentCodes.forEach((c) => delete next[c]);
+            return next;
+          });
+        }
       }
     } catch (err: any) {
       soundService.playError();
@@ -494,6 +611,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         toLocationId: receiveTargetLocationId,
         receivedBy: currentUser.username,
         userSiteAccess: currentUser.siteAccess,
+        receiverNote: receiveNote,
       });
 
       if (res.success) {
@@ -501,6 +619,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         setFeedback({ type: 'success', message: res.message });
         setReceivingTransfer(null);
         setReceiveTargetLocationId('');
+        setReceiveNote('');
       } else {
         soundService.playError();
         setFeedback({ type: 'error', message: res.message });
@@ -636,7 +755,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
           ) : (
             <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
           )}
-          <span>{feedback.message}</span>
+          <span className="whitespace-pre-line">{feedback.message}</span>
         </div>
       )}
 
@@ -689,6 +808,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       </div>
 
                       {t.note && <div className="text-[11px] text-slate-600 dark:text-slate-400 italic">Catatan: {t.note}</div>}
+                      {t.senderNote && (
+                        <div className="text-[11px] text-amber-700 dark:text-amber-400 italic">Catatan Pengirim: {t.senderNote}</div>
+                      )}
                     </div>
 
                     <button
@@ -696,6 +818,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       onClick={() => {
                         setReceivingTransfer(t);
                         setReceiveTargetLocationId('');
+                        setReceiveNote('');
                       }}
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-xs flex items-center justify-center gap-1.5 self-start sm:self-auto transition-transform active:scale-95 min-h-[40px] cursor-pointer"
                       aria-label={`Terima mesin ${t.assetCode}`}
@@ -729,6 +852,8 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 const badge = getBatchStatusBadge(batch);
                 const isExpanded = expandedBatchId === batch.batchId;
                 const canCancel = batch.counts.inTransit > 0;
+                // Batch yang seluruh mesinnya dibatalkan: surat jalan tidak tersedia
+                const isFullyCancelled = batch.machines.length > 0 && batch.counts.cancelled === batch.machines.length;
 
                 return (
                   <div
@@ -774,17 +899,26 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handlePrintSuratJalan(batch.representativeTransferId)}
-                          disabled={printingId === batch.representativeTransferId}
-                          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors min-h-[40px] cursor-pointer"
-                          aria-label={`Cetak surat jalan untuk batch ${batch.batchId}`}
-                          title="Mencetak satu manifest lengkap untuk seluruh mesin dalam pengiriman ini"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                          <span>{printingId === batch.representativeTransferId ? 'Menyiapkan...' : 'Surat Jalan'}</span>
-                        </button>
+                        {isFullyCancelled ? (
+                          <span
+                            className="px-3 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 italic"
+                            title="Transfer yang dibatalkan tidak memiliki surat jalan"
+                          >
+                            Surat jalan tidak tersedia (dibatalkan)
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handlePrintSuratJalan(batch.representativeTransferId)}
+                            disabled={printingId === batch.representativeTransferId}
+                            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors min-h-[40px] cursor-pointer"
+                            aria-label={`Cetak surat jalan untuk batch ${batch.batchId}`}
+                            title="Mencetak satu manifest lengkap untuk seluruh mesin dalam pengiriman ini"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>{printingId === batch.representativeTransferId ? 'Menyiapkan...' : 'Surat Jalan'}</span>
+                          </button>
+                        )}
 
                         {canCancel && (
                           <button
@@ -1052,6 +1186,37 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 )}
               </div>
 
+              {isAdminUser && (
+                <label
+                  htmlFor="multi-site-switch"
+                  className="flex items-center justify-between gap-3 p-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 cursor-pointer"
+                >
+                  <span className="text-xs">
+                    <span className="block font-bold text-violet-900 dark:text-violet-200">Mode multi-site (admin)</span>
+                    <span className="block text-[11px] text-violet-700 dark:text-violet-300">
+                      Izinkan mesin dari beberapa site dalam satu daftar. Dikirim sebagai satu transfer per site asal.
+                    </span>
+                  </span>
+                  <input
+                    id="multi-site-switch"
+                    type="checkbox"
+                    role="switch"
+                    checked={multiSiteMode}
+                    onChange={(e) => setMultiSiteMode(e.target.checked)}
+                    className="h-5 w-9 shrink-0 cursor-pointer accent-violet-600"
+                    aria-label="Mode multi-site (admin)"
+                  />
+                </label>
+              )}
+
+              {!multiSite && siteGroups.length > 1 && (
+                <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-[11px] text-amber-800 dark:text-amber-300 font-semibold">
+                  Daftar berisi mesin dari {siteGroups.length} site ({siteGroups.map((g) => g.siteId).join(', ')}). Satu transfer
+                  hanya boleh berasal dari satu site, hapus sebagian mesin
+                  {isAdminUser ? ' atau nyalakan Mode multi-site.' : '.'}
+                </div>
+              )}
+
               {selectedBatchMachines.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-xs rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-1">
                   <QrCode className="w-7 h-7 mx-auto text-slate-300 dark:text-slate-600 mb-1" />
@@ -1070,6 +1235,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                           <th className="py-2.5 px-3">Nama Mesin</th>
                           <th className="py-2.5 px-3">Lokasi Saat Ini</th>
                           <th className="py-2.5 px-3">Site Asal</th>
+                          <th className="py-2.5 px-3 w-40">Catatan Pengirim</th>
                           <th className="py-2.5 px-3 text-right w-16">Aksi</th>
                         </tr>
                       </thead>
@@ -1111,9 +1277,19 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                                 {m.locationId}
                               </td>
                               <td className="py-2.5 px-3">
-                                <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-[10px] font-mono">
+                                <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] font-mono ${siteBadgeClass(m.siteId)}`}>
                                   {m.siteId}
                                 </span>
+                              </td>
+                              <td className="py-2 px-3">
+                                <input
+                                  type="text"
+                                  value={batchNotes[m.assetCode] ?? ''}
+                                  onChange={(e) => handleBatchNoteChange(m.assetCode, e.target.value)}
+                                  placeholder="Opsional..."
+                                  className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-900 dark:text-white focus:border-emerald-500 placeholder:text-slate-400 min-h-[32px]"
+                                  aria-label={`Catatan pengirim untuk mesin ${m.assetCode}`}
+                                />
                               </td>
                               <td className="py-2.5 px-3 text-right">
                                 <button
@@ -1140,45 +1316,56 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       return (
                         <div
                           key={m.assetCode}
-                          className={`p-3 text-xs flex items-center justify-between gap-2 transition-colors ${
+                          className={`p-3 text-xs flex flex-col gap-2 transition-colors ${
                             isRecent
                               ? 'bg-emerald-50/80 dark:bg-emerald-950/50'
                               : 'bg-white dark:bg-slate-800'
                           }`}
                         >
-                          <div className="min-w-0 space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-[11px] text-slate-400">
-                                #{selectedBatchMachines.length - idx}
-                              </span>
-                              <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
-                                {m.assetCode}
-                              </span>
-                              <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-700 text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300">
-                                {m.siteId}
-                              </span>
-                            </div>
-                            <div className="text-slate-700 dark:text-slate-300 font-semibold truncate">
-                              {getMachineLabel(m).primary}
-                            </div>
-                            {getMachineLabel(m).secondary && (
-                              <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                                {getMachineLabel(m).secondary}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[11px] text-slate-400">
+                                  #{selectedBatchMachines.length - idx}
+                                </span>
+                                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                                  {m.assetCode}
+                                </span>
+                                <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${siteBadgeClass(m.siteId)}`}>
+                                  {m.siteId}
+                                </span>
                               </div>
-                            )}
-                            <div className="text-[11px] text-slate-500 font-mono">
-                              Lokasi: {m.locationId}
+                              <div className="text-slate-700 dark:text-slate-300 font-semibold truncate">
+                                {getMachineLabel(m).primary}
+                              </div>
+                              {getMachineLabel(m).secondary && (
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                  {getMachineLabel(m).secondary}
+                                </div>
+                              )}
+                              <div className="text-[11px] text-slate-500 font-mono">
+                                Lokasi: {m.locationId}
+                              </div>
                             </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveFromBatch(m.assetCode)}
+                              className="p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950 rounded-xl min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer shrink-0"
+                              aria-label={`Hapus mesin ${m.assetCode}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveFromBatch(m.assetCode)}
-                            className="p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950 rounded-xl min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer"
-                            aria-label={`Hapus mesin ${m.assetCode}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <input
+                            type="text"
+                            value={batchNotes[m.assetCode] ?? ''}
+                            onChange={(e) => handleBatchNoteChange(m.assetCode, e.target.value)}
+                            placeholder="Catatan Pengirim (kondisi mesin saat dikirim) - opsional..."
+                            className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-900 dark:text-white focus:border-emerald-500 placeholder:text-slate-400 min-h-[36px]"
+                            aria-label={`Catatan pengirim untuk mesin ${m.assetCode}`}
+                          />
                         </div>
                       );
                     })}
@@ -1236,6 +1423,14 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             </div>
 
             {/* 5) SUBMIT BUTTON */}
+            {multiSite && selectedBatchMachines.length > 0 && (
+              <div
+                className="p-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 text-xs font-semibold text-violet-900 dark:text-violet-200"
+                role="status"
+              >
+                {multiSiteSummary}
+              </div>
+            )}
             <form onSubmit={handleSendTransfer}>
               <button
                 type="submit"
@@ -1247,7 +1442,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 <span>
                   {isSending
                     ? 'Sedang Mengirim ke Server...'
-                    : `Kirim ${selectedBatchMachines.length} Mesin ke ${selectedToSite} (Kunci In Transit)`}
+                    : multiSite && siteGroups.length > 1
+                      ? `Kirim ${selectedBatchMachines.length} Mesin ke ${selectedToSite} (${siteGroups.length} transfer)`
+                      : `Kirim ${selectedBatchMachines.length} Mesin ke ${selectedToSite} (Kunci In Transit)`}
                 </span>
               </button>
             </form>
@@ -1271,6 +1468,11 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
               <div>
                 Dikirim dari: <span className="font-bold text-amber-700 dark:text-amber-400">{receivingTransfer.fromSite}</span>
               </div>
+              {receivingTransfer.senderNote && (
+                <div>
+                  Catatan Pengirim: <span className="italic text-slate-700 dark:text-slate-300">{receivingTransfer.senderNote}</span>
+                </div>
+              )}
             </div>
 
             <div>
@@ -1293,10 +1495,29 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
               </select>
             </div>
 
+            <div>
+              <label htmlFor="receive-note-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Catatan Penerima (opsional):
+              </label>
+              <textarea
+                id="receive-note-input"
+                value={receiveNote}
+                onChange={(e) => setReceiveNote(e.target.value)}
+                maxLength={500}
+                rows={2}
+                placeholder="Hasil pemeriksaan saat tiba: kondisi mesin, kerusakan, kekurangan aksesori..."
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white focus:border-emerald-500"
+                aria-label="Catatan penerima hasil pemeriksaan mesin"
+              />
+            </div>
+
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setReceivingTransfer(null)}
+                onClick={() => {
+                  setReceivingTransfer(null);
+                  setReceiveNote('');
+                }}
                 disabled={isReceiving}
                 className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 min-h-[40px] cursor-pointer"
               >
@@ -1343,7 +1564,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             ) : (
               <XCircle className="w-5 h-5 shrink-0" />
             )}
-            <span className="leading-snug">{scanToast.text}</span>
+            <span className="leading-snug whitespace-pre-line">{scanToast.text}</span>
           </div>
         </div>
       )}
