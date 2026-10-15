@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../services/authContext';
+import { makeT, localizeMessage } from '../services/translations';
 import {
   gasAuthService,
   GasManagedUser,
@@ -39,7 +40,8 @@ interface FormErrors {
 }
 
 export const UserManagementView: React.FC = () => {
-  const { currentUser, canAddUser } = useAuth();
+  const { currentUser, canAddUser, language } = useAuth();
+  const t = makeT(language);
 
   // Data State
   const [usersList, setUsersList] = useState<GasManagedUser[]>([]);
@@ -134,10 +136,10 @@ export const UserManagementView: React.FC = () => {
       if (res.success && Array.isArray(res.users)) {
         setUsersList(res.users);
       } else {
-        setFetchError(res.message || 'Gagal mengambil daftar pengguna dari server.');
+        setFetchError(localizeMessage(res.message || t('um_fetch_failed'), language));
       }
     } catch (err: any) {
-      setFetchError(err.message || 'Terjadi kesalahan koneksi saat memuat data pengguna.');
+      setFetchError(localizeMessage(err.message || t('um_fetch_conn_err'), language));
     } finally {
       setIsLoadingList(false);
     }
@@ -160,7 +162,7 @@ export const UserManagementView: React.FC = () => {
         sites: ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA'],
         rackMap: true,
         canAddUser: true,
-        desc: 'Hak akses penuh ke seluruh modul, semua site, Rack Map WH2, dan mengelola pengguna.',
+        desc: t('um_desc_admin'),
       };
     }
     if (authLower === 'all sites' || authLower === 'all') {
@@ -171,7 +173,7 @@ export const UserManagementView: React.FC = () => {
         sites: ['PW1', 'PW2', 'PW3', 'WH2', 'SW', 'QA'],
         rackMap: true,
         canAddUser: false,
-        desc: 'Akses ke semua site dan Rack Map WH2. Tidak dapat mengelola pengguna.',
+        desc: t('um_desc_all'),
       };
     }
     if (['warehouse2', 'warehouse', 'wh2'].includes(authLower.replace(/\s+/g, ''))) {
@@ -182,7 +184,7 @@ export const UserManagementView: React.FC = () => {
         sites: ['WH2'],
         rackMap: true,
         canAddUser: false,
-        desc: 'Dibatasi hanya untuk mesin di Warehouse 2 (WH2). Dapat mengakses Rack Map WH2. Tidak dapat mengelola pengguna.',
+        desc: t('um_desc_wh'),
       };
     }
     if (['PW1', 'PW2', 'PW3'].includes(authValue.toUpperCase())) {
@@ -194,7 +196,7 @@ export const UserManagementView: React.FC = () => {
         sites: [site],
         rackMap: false,
         canAddUser: false,
-        desc: `Dibatasi hanya untuk mesin di site ${site}. Tidak dapat mengakses Rack Map WH2.`,
+        desc: t('um_desc_factory', { site }),
       };
     }
     return {
@@ -204,7 +206,7 @@ export const UserManagementView: React.FC = () => {
       sites: [],
       rackMap: false,
       canAddUser: false,
-      desc: 'Otoritas belum ditentukan atau tidak dikenal.',
+      desc: t('um_desc_unknown'),
     };
   };
 
@@ -215,19 +217,19 @@ export const UserManagementView: React.FC = () => {
     const cleanProfile = profileName.trim();
 
     if (!cleanNik) {
-      errors.nik = 'NIK wajib diisi.';
+      errors.nik = t('um_err_nik_req');
     } else if (!/^[A-Za-z0-9._-]{3,20}$/.test(cleanNik)) {
-      errors.nik = 'NIK harus 3–20 karakter alfanumerik (huruf, angka, titik, strip, underscore).';
+      errors.nik = t('um_err_nik_fmt');
     }
 
     if (!cleanProfile) {
-      errors.profileName = 'Nama lengkap / profile wajib diisi.';
+      errors.profileName = t('um_err_name_req');
     }
 
     if (!password) {
-      errors.password = 'Password sementara wajib diisi.';
+      errors.password = t('um_err_pw_req');
     } else if (password.length < 6) {
-      errors.password = 'Password minimal 6 karakter.';
+      errors.password = t('um_err_pw_min');
     }
 
     setFormErrors(errors);
@@ -257,7 +259,7 @@ export const UserManagementView: React.FC = () => {
       if (res.success) {
         setNotice({
           type: 'success',
-          text: res.message || `Pengguna ${cleanNik} berhasil ditambahkan.`,
+          text: localizeMessage(res.message || t('um_added_ok', { nik: cleanNik }), language),
         });
         // Show Credentials Modal
         setCreatedModalData({
@@ -276,13 +278,13 @@ export const UserManagementView: React.FC = () => {
       } else {
         setNotice({
           type: 'error',
-          text: res.message || 'Gagal menambahkan pengguna.',
+          text: localizeMessage(res.message || t('um_add_failed'), language),
         });
       }
     } catch (err: any) {
       setNotice({
         type: 'error',
-        text: err.message || 'Terjadi kesalahan sistem saat menambah pengguna.',
+        text: localizeMessage(err.message || t('um_add_sys_err'), language),
       });
     } finally {
       setIsSubmitting(false);
@@ -329,20 +331,20 @@ export const UserManagementView: React.FC = () => {
       if (res.success) {
         setNotice({
           type: 'success',
-          text: res.message || `Data pengguna ${editingUser.nik} berhasil diperbarui.`,
+          text: localizeMessage(res.message || t('um_updated_ok', { nik: editingUser.nik }), language),
         });
         setEditingUser(null);
         await fetchUsers();
       } else {
         setNotice({
           type: 'error',
-          text: res.message || 'Gagal memperbarui data pengguna.',
+          text: localizeMessage(res.message || t('um_update_failed'), language),
         });
       }
     } catch (err: any) {
       setNotice({
         type: 'error',
-        text: err.message || 'Terjadi kesalahan saat memperbarui pengguna.',
+        text: localizeMessage(err.message || t('um_update_err'), language),
       });
     } finally {
       setIsUpdating(false);
@@ -364,7 +366,7 @@ export const UserManagementView: React.FC = () => {
     if (!newResetPassword || newResetPassword.length < 6) {
       setNotice({
         type: 'error',
-        text: 'Password baru minimal 6 karakter.',
+        text: t('um_newpw_min'),
       });
       return;
     }
@@ -386,20 +388,20 @@ export const UserManagementView: React.FC = () => {
         });
         setNotice({
           type: 'success',
-          text: res.message || `Password untuk ${resettingUser.nik} berhasil direset.`,
+          text: localizeMessage(res.message || t('um_reset_ok', { nik: resettingUser.nik }), language),
         });
         setResettingUser(null);
         await fetchUsers();
       } else {
         setNotice({
           type: 'error',
-          text: res.message || 'Gagal mereset password pengguna.',
+          text: localizeMessage(res.message || t('um_reset_failed'), language),
         });
       }
     } catch (err: any) {
       setNotice({
         type: 'error',
-        text: err.message || 'Terjadi kesalahan sistem saat mereset password.',
+        text: localizeMessage(err.message || t('um_reset_sys_err'), language),
       });
     } finally {
       setIsResetting(false);
@@ -423,20 +425,20 @@ export const UserManagementView: React.FC = () => {
       if (res.success) {
         setNotice({
           type: 'success',
-          text: `Status pengguna ${statusConfirmUser.nik} diubah menjadi ${newStatus ? 'Aktif' : 'Nonaktif'}.`,
+          text: t('um_status_changed', { nik: statusConfirmUser.nik, status: newStatus ? t('um_active') : t('um_inactive') }),
         });
         setStatusConfirmUser(null);
         await fetchUsers();
       } else {
         setNotice({
           type: 'error',
-          text: res.message || 'Gagal mengubah status pengguna.',
+          text: localizeMessage(res.message || t('um_status_failed'), language),
         });
       }
     } catch (err: any) {
       setNotice({
         type: 'error',
-        text: err.message || 'Terjadi kesalahan saat mengubah status.',
+        text: localizeMessage(err.message || t('um_status_err'), language),
       });
     } finally {
       setIsTogglingStatus(false);
@@ -489,11 +491,10 @@ export const UserManagementView: React.FC = () => {
           <ShieldAlert className="w-8 h-8" />
         </div>
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-          Akses Ditolak
+          {t('um_denied')}
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-          Anda tidak memiliki akses ke halaman ini. Menu Kelola Pengguna hanya dapat diakses oleh
-          akun <b>Admin Master</b>.
+          {t('um_denied_a')} <b>Admin Master</b>{t('um_denied_b')}
         </p>
       </div>
     );
@@ -509,15 +510,15 @@ export const UserManagementView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 bg-purple-100/70 dark:bg-purple-950/60 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
-              Khusus Admin Master
+              {t('um_admin_only')}
             </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1.5 flex items-center gap-2">
             <Users className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-            <span>Kelola Pengguna</span>
+            <span>{t('um_manage_users')}</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Kelola akun dan hak akses pengguna.
+            {t('um_page_sub')}
           </p>
         </div>
 
@@ -528,7 +529,7 @@ export const UserManagementView: React.FC = () => {
           className="px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 flex items-center gap-2 shadow-xs transition-colors shrink-0 cursor-pointer min-h-[40px]"
         >
           <RotateCcw className={`w-4 h-4 ${isLoadingList ? 'animate-spin text-indigo-600' : ''}`} />
-          <span>{isLoadingList ? 'Memuat...' : 'Segarkan'}</span>
+          <span>{isLoadingList ? t('um_loading') : t('refresh')}</span>
         </button>
       </div>
 
@@ -553,7 +554,7 @@ export const UserManagementView: React.FC = () => {
             type="button"
             onClick={() => setNotice(null)}
             className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1 cursor-pointer"
-            aria-label="Tutup"
+            aria-label={t('close')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -564,7 +565,7 @@ export const UserManagementView: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <div className="text-[11px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
-            Total Pengguna
+            {t('um_stat_total')}
           </div>
           <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
             {stats.total}
@@ -572,7 +573,7 @@ export const UserManagementView: React.FC = () => {
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
-            Akun Aktif
+            {t('um_stat_active')}
           </div>
           <div className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
             {stats.active}
@@ -580,7 +581,7 @@ export const UserManagementView: React.FC = () => {
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <div className="text-[11px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
-            Akun Nonaktif
+            {t('um_stat_inactive')}
           </div>
           <div className="text-xl sm:text-2xl font-black text-slate-500 dark:text-slate-400 mt-1">
             {stats.inactive}
@@ -588,7 +589,7 @@ export const UserManagementView: React.FC = () => {
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
           <div className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
-            Akses Rack Map
+            {t('um_rackmap_access')}
           </div>
           <div className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">
             {stats.rackMap}
@@ -608,10 +609,10 @@ export const UserManagementView: React.FC = () => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                Tambah Pengguna Baru
+                {t('um_add_title')}
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Pemberian akses akun dan kredensial sementara
+                {t('um_add_sub')}
               </p>
             </div>
           </div>
@@ -620,7 +621,7 @@ export const UserManagementView: React.FC = () => {
             {/* NIK */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                NIK (Nomor Induk Karyawan) <span className="text-rose-500">*</span>
+                {t('um_nik_label')} <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
@@ -630,7 +631,7 @@ export const UserManagementView: React.FC = () => {
                   setNik(e.target.value);
                   if (formErrors.nik) setFormErrors({ ...formErrors, nik: undefined });
                 }}
-                placeholder="Contoh: 2211025 atau ME-PW1"
+                placeholder={t('um_nik_ph')}
                 className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-1 transition-colors min-h-[40px] ${
                   formErrors.nik
                     ? 'border-rose-300 dark:border-rose-700 focus:ring-rose-500'
@@ -644,7 +645,7 @@ export const UserManagementView: React.FC = () => {
                 </p>
               ) : (
                 <p className="text-[10px] text-slate-400 mt-1">
-                  3–20 karakter alfanumerik (huruf, angka, titik, strip, underscore).
+                  {t('um_nik_hint')}
                 </p>
               )}
             </div>
@@ -652,7 +653,7 @@ export const UserManagementView: React.FC = () => {
             {/* Nama Lengkap */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                Nama Lengkap / Profile <span className="text-rose-500">*</span>
+                {t('um_fullname_profile')} <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
@@ -662,7 +663,7 @@ export const UserManagementView: React.FC = () => {
                   setProfileName(e.target.value);
                   if (formErrors.profileName) setFormErrors({ ...formErrors, profileName: undefined });
                 }}
-                placeholder="Contoh: Budi Santoso (Mekanik PW1)"
+                placeholder={t('um_name_ph')}
                 className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 transition-colors min-h-[40px] ${
                   formErrors.profileName
                     ? 'border-rose-300 dark:border-rose-700 focus:ring-rose-500'
@@ -681,7 +682,7 @@ export const UserManagementView: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  Password Sementara <span className="text-rose-500">*</span>
+                  {t('um_temp_password')} <span className="text-rose-500">*</span>
                 </label>
                 <div className="flex items-center gap-1.5">
                   <button
@@ -694,7 +695,7 @@ export const UserManagementView: React.FC = () => {
                     className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer"
                   >
                     <Dices className="w-3.5 h-3.5" />
-                    <span>Buat acak</span>
+                    <span>{t('um_random')}</span>
                   </button>
                   {password && (
                     <button
@@ -705,12 +706,12 @@ export const UserManagementView: React.FC = () => {
                       {copiedField === 'add-pw' ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-500" />
-                          <span className="text-emerald-600">Disalin</span>
+                          <span className="text-emerald-600">{t('um_copied')}</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5" />
-                          <span>Salin</span>
+                          <span>{t('um_copy')}</span>
                         </>
                       )}
                     </button>
@@ -727,7 +728,7 @@ export const UserManagementView: React.FC = () => {
                     setPassword(e.target.value);
                     if (formErrors.password) setFormErrors({ ...formErrors, password: undefined });
                   }}
-                  placeholder="Minimal 6 karakter"
+                  placeholder={t('um_pw_ph')}
                   className={`w-full pl-3.5 pr-10 py-2.5 text-xs rounded-xl border bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-1 transition-colors min-h-[40px] ${
                     formErrors.password
                       ? 'border-rose-300 dark:border-rose-700 focus:ring-rose-500'
@@ -739,7 +740,7 @@ export const UserManagementView: React.FC = () => {
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
-                  aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
+                  aria-label={showPassword ? t('um_hide_pw') : t('um_show_pw')}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -752,7 +753,7 @@ export const UserManagementView: React.FC = () => {
               ) : (
                 <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <span>Password disimpan dalam bentuk hash dan tidak dapat dilihat oleh siapa pun.</span>
+                  <span>{t('um_pw_hashed')}</span>
                 </p>
               )}
             </div>
@@ -760,7 +761,7 @@ export const UserManagementView: React.FC = () => {
             {/* Dropdown Authority */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                Authority (Tingkat Otoritas) <span className="text-rose-500">*</span>
+                {t('um_authority_label')} <span className="text-rose-500">*</span>
               </label>
               <select
                 value={authority}
@@ -768,12 +769,12 @@ export const UserManagementView: React.FC = () => {
                 onChange={(e) => setAuthority(e.target.value)}
                 className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium min-h-[40px] cursor-pointer"
               >
-                <option value="admin master">Admin Master - semua site + kelola pengguna</option>
-                <option value="all sites">All Sites - semua site, tanpa kelola pengguna</option>
-                <option value="PW1">PW1 - Pabrik Factory 1</option>
-                <option value="PW2">PW2 - Pabrik Factory 2</option>
-                <option value="PW3">PW3 - Pabrik Factory 3</option>
-                <option value="Warehouse 2">Warehouse 2 - hanya WH2 + Rack Map</option>
+                <option value="admin master">{t('um_opt_admin')}</option>
+                <option value="all sites">{t('um_opt_all')}</option>
+                <option value="PW1">{t('um_opt_pw1')}</option>
+                <option value="PW2">{t('um_opt_pw2')}</option>
+                <option value="PW3">{t('um_opt_pw3')}</option>
+                <option value="Warehouse 2">{t('um_opt_wh')}</option>
               </select>
             </div>
 
@@ -781,7 +782,7 @@ export const UserManagementView: React.FC = () => {
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200/70 dark:border-slate-800 space-y-2.5 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Hak akses yang akan diberikan:
+                  {t('um_perm_given')}
                 </span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${currentAddPreview.roleBadgeColor}`}>
                   {currentAddPreview.roleLabel}
@@ -790,21 +791,21 @@ export const UserManagementView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
                 <div className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800">
-                  <span className="text-slate-500 dark:text-slate-400">Akses Rack Map</span>
+                  <span className="text-slate-500 dark:text-slate-400">{t('um_rackmap_access')}</span>
                   <span className={`font-bold ${currentAddPreview.rackMap ? 'text-emerald-600' : 'text-slate-400'}`}>
-                    {currentAddPreview.rackMap ? 'Ya' : 'Tidak'}
+                    {currentAddPreview.rackMap ? t('um_yes') : t('um_no')}
                   </span>
                 </div>
                 <div className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800">
-                  <span className="text-slate-500 dark:text-slate-400">Kelola Pengguna</span>
+                  <span className="text-slate-500 dark:text-slate-400">{t('um_manage_users')}</span>
                   <span className={`font-bold ${currentAddPreview.canAddUser ? 'text-emerald-600' : 'text-slate-400'}`}>
-                    {currentAddPreview.canAddUser ? 'Ya' : 'Tidak'}
+                    {currentAddPreview.canAddUser ? t('um_yes') : t('um_no')}
                   </span>
                 </div>
               </div>
 
               <div>
-                <div className="text-[10px] text-slate-400 mb-1 font-medium">Site yang dapat diakses:</div>
+                <div className="text-[10px] text-slate-400 mb-1 font-medium">{t('um_sites_access')}</div>
                 <div className="flex flex-wrap gap-1">
                   {currentAddPreview.sites.map((s) => (
                     <span
@@ -831,12 +832,12 @@ export const UserManagementView: React.FC = () => {
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Menyimpan Pengguna...</span>
+                  <span>{t('um_saving_user')}</span>
                 </>
               ) : (
                 <>
                   <UserPlus className="w-4 h-4" />
-                  <span>Tambah Pengguna</span>
+                  <span>{t('um_add_user')}</span>
                 </>
               )}
             </button>
@@ -855,15 +856,15 @@ export const UserManagementView: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                  Daftar Pengguna
+                  {t('um_list_title')}
                 </h2>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {usersList.length} akun terdaftar di sistem
+                  {t('um_accounts_registered', { n: usersList.length })}
                 </p>
               </div>
             </div>
             <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 self-start sm:self-auto">
-              Total: {usersList.length}
+              {t('um_total_n', { n: usersList.length })}
             </span>
           </div>
 
@@ -875,7 +876,7 @@ export const UserManagementView: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari NIK atau Nama..."
+                placeholder={t('um_search_ph')}
                 className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[38px]"
               />
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -897,7 +898,7 @@ export const UserManagementView: React.FC = () => {
                 onChange={(e) => setFilterRole(e.target.value)}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[38px] cursor-pointer"
               >
-                <option value="ALL">Semua Role</option>
+                <option value="ALL">{t('um_all_roles')}</option>
                 <option value="ADMIN_MASTER">Admin Master</option>
                 <option value="ALL_SITES">All Sites</option>
                 <option value="FACTORY">Factory</option>
@@ -913,9 +914,9 @@ export const UserManagementView: React.FC = () => {
                 onChange={(e) => setFilterStatus(e.target.value)}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[38px] cursor-pointer"
               >
-                <option value="ALL">Semua Status</option>
-                <option value="ACTIVE">Aktif</option>
-                <option value="INACTIVE">Nonaktif</option>
+                <option value="ALL">{t('um_all_status')}</option>
+                <option value="ACTIVE">{t('um_active')}</option>
+                <option value="INACTIVE">{t('um_inactive')}</option>
               </select>
             </div>
           </div>
@@ -932,7 +933,7 @@ export const UserManagementView: React.FC = () => {
               ))}
               <div className="text-center text-xs text-slate-400 flex items-center justify-center gap-2 pt-2">
                 <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
-                <span>Memuat data pengguna dari server...</span>
+                <span>{t('um_loading_users')}</span>
               </div>
             </div>
           ) : fetchError ? (
@@ -940,7 +941,7 @@ export const UserManagementView: React.FC = () => {
             <div className="py-12 px-4 text-center space-y-3 bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900 rounded-2xl">
               <AlertCircle className="w-8 h-8 text-rose-600 mx-auto" />
               <div className="text-sm font-bold text-rose-900 dark:text-rose-200">
-                Gagal Memuat Data Pengguna
+                {t('um_load_err_title')}
               </div>
               <p className="text-xs text-rose-700 dark:text-rose-300 max-w-md mx-auto">
                 {fetchError}
@@ -951,7 +952,7 @@ export const UserManagementView: React.FC = () => {
                 className="mt-2 px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer min-h-[40px]"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Coba Lagi</span>
+                <span>{t('retry')}</span>
               </button>
             </div>
           ) : filteredUsers.length === 0 ? (
@@ -959,12 +960,12 @@ export const UserManagementView: React.FC = () => {
             <div className="py-14 text-center text-slate-400 dark:text-slate-500 text-xs space-y-2">
               <Users className="w-8 h-8 mx-auto opacity-40 text-slate-400" />
               <div className="font-semibold text-slate-600 dark:text-slate-400">
-                Tidak ada pengguna yang sesuai
+                {t('um_empty_title')}
               </div>
               <p className="text-[11px] max-w-xs mx-auto">
                 {searchQuery || filterRole !== 'ALL' || filterStatus !== 'ALL'
-                  ? 'Coba sesuaikan kata kunci pencarian atau filter yang dipilih.'
-                  : 'Belum ada data pengguna yang terdaftar di server.'}
+                  ? t('um_empty_filtered')
+                  : t('um_empty_none')}
               </p>
             </div>
           ) : (
@@ -975,12 +976,12 @@ export const UserManagementView: React.FC = () => {
                   <thead>
                     <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       <th className="pb-3 pl-2">NIK</th>
-                      <th className="pb-3">Nama</th>
+                      <th className="pb-3">{t('um_th_name')}</th>
                       <th className="pb-3">Role</th>
-                      <th className="pb-3">Site Akses</th>
-                      <th className="pb-3 text-center">Rack Map</th>
-                      <th className="pb-3 text-center">Status</th>
-                      <th className="pb-3 pr-2 text-right">Aksi</th>
+                      <th className="pb-3">{t('um_th_sites')}</th>
+                      <th className="pb-3 text-center">{t('um_rackmap')}</th>
+                      <th className="pb-3 text-center">{t('status')}</th>
+                      <th className="pb-3 pr-2 text-right">{t('actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
@@ -1016,7 +1017,7 @@ export const UserManagementView: React.FC = () => {
                               <span>{u.nik}</span>
                               {isSelf && (
                                 <span className="text-[9px] font-sans font-bold px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                                  Anda
+                                  {t('um_you')}
                                 </span>
                               )}
                             </div>
@@ -1069,7 +1070,7 @@ export const UserManagementView: React.FC = () => {
                             {u.rackMap ? (
                               <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Ya</span>
+                                <span>{t('um_yes')}</span>
                               </span>
                             ) : (
                               <span className="text-slate-400 text-xs">—</span>
@@ -1085,7 +1086,7 @@ export const UserManagementView: React.FC = () => {
                                   : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                               }`}
                             >
-                              {isActive ? 'Aktif' : 'Nonaktif'}
+                              {isActive ? t('um_active') : t('um_inactive')}
                             </span>
                           </td>
 
@@ -1097,7 +1098,7 @@ export const UserManagementView: React.FC = () => {
                                 type="button"
                                 onClick={() => handleOpenEdit(u)}
                                 className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer"
-                                title="Edit Pengguna"
+                                title={t('um_edit_user')}
                               >
                                 <Edit3 className="w-4 h-4" />
                               </button>
@@ -1107,7 +1108,7 @@ export const UserManagementView: React.FC = () => {
                                 type="button"
                                 onClick={() => handleOpenReset(u)}
                                 className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors cursor-pointer"
-                                title="Reset Password"
+                                title={t('um_reset_password')}
                               >
                                 <KeyRound className="w-4 h-4" />
                               </button>
@@ -1126,10 +1127,10 @@ export const UserManagementView: React.FC = () => {
                                 }`}
                                 title={
                                   isSelf
-                                    ? 'Tidak dapat mengubah akun sendiri'
+                                    ? t('um_self_nochange')
                                     : isActive
-                                    ? 'Nonaktifkan Akun'
-                                    : 'Aktifkan Akun'
+                                    ? t('um_deactivate_account')
+                                    : t('um_activate_account')
                                 }
                               >
                                 <Power className="w-4 h-4" />
@@ -1162,7 +1163,7 @@ export const UserManagementView: React.FC = () => {
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="font-bold text-sm text-slate-900 dark:text-white">
-                            {u.profile || 'Tanpa Nama'}
+                            {u.profile || t('um_no_name')}
                           </div>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <span className="font-mono text-xs text-slate-600 dark:text-slate-300 font-bold">
@@ -1170,7 +1171,7 @@ export const UserManagementView: React.FC = () => {
                             </span>
                             {isSelf && (
                               <span className="text-[9px] font-sans font-bold px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                                Anda
+                                {t('um_you')}
                               </span>
                             )}
                           </div>
@@ -1183,7 +1184,7 @@ export const UserManagementView: React.FC = () => {
                               : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                           }`}
                         >
-                          {isActive ? 'Aktif' : 'Nonaktif'}
+                          {isActive ? t('um_active') : t('um_inactive')}
                         </span>
                       </div>
 
@@ -1194,7 +1195,7 @@ export const UserManagementView: React.FC = () => {
 
                         {u.rackMap && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-semibold">
-                            Rack Map
+                            {t('um_rackmap')}
                           </span>
                         )}
                       </div>
@@ -1218,7 +1219,7 @@ export const UserManagementView: React.FC = () => {
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 hover:text-indigo-600 transition-colors flex items-center gap-1 min-h-[40px]"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
-                          <span>Edit</span>
+                          <span>{t('um_edit')}</span>
                         </button>
                         <button
                           type="button"
@@ -1226,7 +1227,7 @@ export const UserManagementView: React.FC = () => {
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 transition-colors flex items-center gap-1 min-h-[40px]"
                         >
                           <KeyRound className="w-3.5 h-3.5" />
-                          <span>Reset PW</span>
+                          <span>{t('um_reset_pw_short')}</span>
                         </button>
                         <button
                           type="button"
@@ -1241,7 +1242,7 @@ export const UserManagementView: React.FC = () => {
                           }`}
                         >
                           <Power className="w-3.5 h-3.5" />
-                          <span>{isActive ? 'Nonaktifkan' : 'Aktifkan'}</span>
+                          <span>{isActive ? t('um_deactivate') : t('um_activate')}</span>
                         </button>
                       </div>
                     </div>
@@ -1265,10 +1266,10 @@ export const UserManagementView: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                  Akun Berhasil Dibuat
+                  {t('um_created_title')}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Salin kredensial sementara untuk diberikan ke pengguna
+                  {t('um_created_sub')}
                 </p>
               </div>
             </div>
@@ -1276,7 +1277,7 @@ export const UserManagementView: React.FC = () => {
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800 space-y-3">
               <div>
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
-                  Nama Lengkap
+                  {t('um_fullname')}
                 </div>
                 <div className="text-xs font-semibold text-slate-900 dark:text-white">
                   {createdModalData.profile}
@@ -1285,7 +1286,7 @@ export const UserManagementView: React.FC = () => {
 
               <div>
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
-                  NIK (Username Login)
+                  {t('um_nik_login')}
                 </div>
                 <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 font-mono text-xs font-bold text-slate-900 dark:text-white">
                   <span>{createdModalData.nik}</span>
@@ -1305,7 +1306,7 @@ export const UserManagementView: React.FC = () => {
 
               <div>
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
-                  Password Sementara
+                  {t('um_temp_password')}
                 </div>
                 <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">
                   <span>{createdModalData.temporaryPassword}</span>
@@ -1329,8 +1330,7 @@ export const UserManagementView: React.FC = () => {
             <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
               <span>
-                Password tidak dapat dilihat lagi setelah dialog ini ditutup. Berikan langsung ke
-                pengguna dan minta ia menggantinya lewat menu Ubah password.
+                {t('um_created_warn')}
               </span>
             </div>
 
@@ -1339,7 +1339,7 @@ export const UserManagementView: React.FC = () => {
               onClick={() => setCreatedModalData(null)}
               className="w-full py-2.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-100 transition-colors cursor-pointer min-h-[40px]"
             >
-              Tutup Dialog
+              {t('um_close_dialog')}
             </button>
           </div>
         </div>
@@ -1358,10 +1358,10 @@ export const UserManagementView: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                    Edit Pengguna: {editingUser.nik}
+                    {t('um_edit_user_nik', { nik: editingUser.nik })}
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Perbarui data nama, otoritas, dan status akun
+                    {t('um_edit_sub')}
                   </p>
                 </div>
               </div>
@@ -1378,7 +1378,7 @@ export const UserManagementView: React.FC = () => {
               {/* NIK (Readonly) */}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  NIK (Tidak dapat diubah)
+                  {t('um_nik_readonly')}
                 </label>
                 <input
                   type="text"
@@ -1391,7 +1391,7 @@ export const UserManagementView: React.FC = () => {
               {/* Nama Lengkap */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Nama Lengkap / Profile <span className="text-rose-500">*</span>
+                  {t('um_fullname_profile')} <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -1405,28 +1405,28 @@ export const UserManagementView: React.FC = () => {
               {/* Authority */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Authority (Tingkat Otoritas)
+                  {t('um_authority_label')}
                 </label>
                 <select
                   value={editAuthority}
                   onChange={(e) => setEditAuthority(e.target.value)}
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[40px] cursor-pointer"
                 >
-                  <option value="admin master">Admin Master - semua site + kelola pengguna</option>
-                  <option value="all sites">All Sites - semua site, tanpa kelola pengguna</option>
-                  <option value="PW1">PW1 - Pabrik Factory 1</option>
-                  <option value="PW2">PW2 - Pabrik Factory 2</option>
-                  <option value="PW3">PW3 - Pabrik Factory 3</option>
-                  <option value="Warehouse 2">Warehouse 2 - hanya WH2 + Rack Map</option>
+                  <option value="admin master">{t('um_opt_admin')}</option>
+                  <option value="all sites">{t('um_opt_all')}</option>
+                  <option value="PW1">{t('um_opt_pw1')}</option>
+                  <option value="PW2">{t('um_opt_pw2')}</option>
+                  <option value="PW3">{t('um_opt_pw3')}</option>
+                  <option value="Warehouse 2">{t('um_opt_wh')}</option>
                 </select>
               </div>
 
               {/* Status Switch */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800">
                 <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">Status Akun</div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">{t('um_account_status')}</div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {editActive ? 'Pengguna dapat login dan beraktivitas' : 'Akses pengguna dinonaktifkan'}
+                    {editActive ? t('um_user_can_login') : t('um_user_disabled')}
                   </div>
                 </div>
                 <button
@@ -1448,7 +1448,7 @@ export const UserManagementView: React.FC = () => {
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800 text-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">
-                    Pratinjau Hak Akses:
+                    {t('um_preview')}
                   </span>
                   <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${currentEditPreview.roleBadgeColor}`}>
                     {currentEditPreview.roleLabel}
@@ -1465,7 +1465,7 @@ export const UserManagementView: React.FC = () => {
 
               {/* Warning notice */}
               <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300">
-                Pengguna akan otomatis keluar dan harus login ulang jika hak akses atau status diubah.
+                {t('um_edit_warn')}
               </div>
 
               {/* Action Buttons */}
@@ -1475,7 +1475,7 @@ export const UserManagementView: React.FC = () => {
                   onClick={() => setEditingUser(null)}
                   className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 transition-colors cursor-pointer min-h-[40px]"
                 >
-                  Batal
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
@@ -1485,10 +1485,10 @@ export const UserManagementView: React.FC = () => {
                   {isUpdating ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Menyimpan...</span>
+                      <span>{t('um_saving')}</span>
                     </>
                   ) : (
-                    <span>Simpan Perubahan</span>
+                    <span>{t('save_changes')}</span>
                   )}
                 </button>
               </div>
@@ -1510,10 +1510,10 @@ export const UserManagementView: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                    Reset Password
+                    {t('um_reset_password')}
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Akun: {resettingUser.nik} ({resettingUser.profile})
+                    {t('um_account_of', { nik: resettingUser.nik, profile: resettingUser.profile })}
                   </p>
                 </div>
               </div>
@@ -1530,7 +1530,7 @@ export const UserManagementView: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
-                    Password Baru Sementara <span className="text-rose-500">*</span>
+                    {t('um_new_temp_pw')} <span className="text-rose-500">*</span>
                   </label>
                   <button
                     type="button"
@@ -1538,7 +1538,7 @@ export const UserManagementView: React.FC = () => {
                     className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer"
                   >
                     <Dices className="w-3.5 h-3.5" />
-                    <span>Buat acak</span>
+                    <span>{t('um_random')}</span>
                   </button>
                 </div>
 
@@ -1547,7 +1547,7 @@ export const UserManagementView: React.FC = () => {
                     type={showResetPassword ? 'text' : 'password'}
                     value={newResetPassword}
                     onChange={(e) => setNewResetPassword(e.target.value)}
-                    placeholder="Minimal 6 karakter"
+                    placeholder={t('um_pw_ph')}
                     className="w-full pl-3.5 pr-10 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[40px]"
                     required
                   />
@@ -1560,7 +1560,7 @@ export const UserManagementView: React.FC = () => {
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Password lama tidak dapat dilihat. Berikan password sementara ini ke pengguna.
+                  {t('um_oldpw_hint')}
                 </p>
               </div>
 
@@ -1570,7 +1570,7 @@ export const UserManagementView: React.FC = () => {
                   onClick={() => setResettingUser(null)}
                   className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 transition-colors cursor-pointer min-h-[40px]"
                 >
-                  Batal
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
@@ -1580,10 +1580,10 @@ export const UserManagementView: React.FC = () => {
                   {isResetting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Mereset...</span>
+                      <span>{t('um_resetting')}</span>
                     </>
                   ) : (
-                    <span>Reset Password</span>
+                    <span>{t('um_reset_password')}</span>
                   )}
                 </button>
               </div>
@@ -1604,10 +1604,10 @@ export const UserManagementView: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                  Password Berhasil Direset
+                  {t('um_reset_done')}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Berikan password sementara ini kepada pengguna
+                  {t('um_reset_done_sub')}
                 </p>
               </div>
             </div>
@@ -1635,7 +1635,7 @@ export const UserManagementView: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              Minta pengguna untuk segera mengganti password sementara ini setelah login pertama kali.
+              {t('um_reset_done_note')}
             </p>
 
             <button
@@ -1643,7 +1643,7 @@ export const UserManagementView: React.FC = () => {
               onClick={() => setResetSuccessData(null)}
               className="w-full py-2.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-100 transition-colors cursor-pointer min-h-[40px]"
             >
-              Selesai
+              {t('um_done')}
             </button>
           </div>
         </div>
@@ -1665,7 +1665,7 @@ export const UserManagementView: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                  {statusConfirmUser.active !== false ? 'Nonaktifkan Akun?' : 'Aktifkan Akun?'}
+                  {statusConfirmUser.active !== false ? t('um_deactivate_q') : t('um_activate_q')}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {statusConfirmUser.nik} ({statusConfirmUser.profile})
@@ -1675,8 +1675,8 @@ export const UserManagementView: React.FC = () => {
 
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               {statusConfirmUser.active !== false
-                ? 'Akun ini tidak akan dapat login ke sistem sampai diaktifkan kembali oleh Admin Master.'
-                : 'Akun ini akan dipulihkan dan dapat kembali login serta beraktivitas di sistem.'}
+                ? t('um_deactivate_msg')
+                : t('um_activate_msg')}
             </p>
 
             <div className="flex items-center gap-3 pt-1">
@@ -1685,7 +1685,7 @@ export const UserManagementView: React.FC = () => {
                 onClick={() => setStatusConfirmUser(null)}
                 className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 transition-colors cursor-pointer min-h-[40px]"
               >
-                Batal
+                {t('cancel')}
               </button>
               <button
                 type="button"
@@ -1700,10 +1700,10 @@ export const UserManagementView: React.FC = () => {
                 {isTogglingStatus ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Memproses...</span>
+                    <span>{t('um_processing')}</span>
                   </>
                 ) : (
-                  <span>{statusConfirmUser.active !== false ? 'Ya, Nonaktifkan' : 'Ya, Aktifkan'}</span>
+                  <span>{statusConfirmUser.active !== false ? t('um_yes_deactivate') : t('um_yes_activate')}</span>
                 )}
               </button>
             </div>

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 import { Machine } from '../types';
@@ -62,6 +62,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   const lastContinuous = useRef<{ code: string; at: number }>({ code: '', at: 0 });
 
   const { language, canAccessSite } = useAuth();
+  const t = makeT(language);
   const [mode, setMode] = useState<'physical' | 'camera'>('physical');
   const [inputValue, setInputValue] = useState('');
   const [scannedMachine, setScannedMachine] = useState<Machine | null>(null);
@@ -114,7 +115,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Kamera tidak didukung pada peramban ini.');
+        throw new Error(t('scn_err_camera_unsupported'));
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -159,7 +160,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
           });
           setTorchOn(!torchOn);
         } else {
-          alert('Lampu senter tidak didukung pada kamera perangkat ini.');
+          alert(t('scn_torch_unsupported'));
         }
       } catch {
         // Ignore
@@ -223,7 +224,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
         onClose();
       } else {
         soundService.playError();
-        setErrorMessage(`Mesin dengan Barcode/Kode Aset "${cleanCode}" tidak ditemukan di database.`);
+        setErrorMessage(t('scn_err_not_found', { code: cleanCode }));
         // Lanjutkan memindai setelah jeda singkat agar pesan tidak berkedip dan tidak memicu bacaan ganda.
         setTimeout(() => {
           if (streamRef.current) animationFrameId.current = requestAnimationFrame(tickVideoScan);
@@ -239,7 +240,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     } else {
       soundService.playError();
       setScannedMachine(null);
-      setErrorMessage(`Mesin dengan Barcode/Kode Aset "${cleanCode}" tidak ditemukan di database.`);
+      setErrorMessage(t('scn_err_not_found', { code: cleanCode }));
     }
   };
 
@@ -282,12 +283,12 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               </h3>
               <p className="text-xs text-slate-500">
                 {onCapture
-                  ? 'Hasil scan otomatis dimasukkan ke kolom Cari slot'
+                  ? t('scn_sub_capture')
                   : onContinuousScan
-                  ? 'Arahkan kamera ke barcode satu per satu. Mesin langsung masuk daftar.'
+                  ? t('scn_sub_continuous')
                   : mode === 'physical'
-                  ? 'Siap menerima scan dari barcode gun 2D (QR Code)'
-                  : 'Arahkan kamera ke QR Code label mesin'}
+                  ? t('scn_sub_physical')
+                  : t('scn_sub_camera')}
               </p>
             </div>
           </div>
@@ -390,7 +391,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                     onClick={() => setMode('physical')}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold"
                   >
-                    Beralih ke Input Manual
+                    {t('scn_switch_manual')}
                   </button>
                 </div>
               )}
@@ -400,7 +401,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
           {/* PHYSICAL SCANNER INPUT / MANUAL INPUT */}
           <form onSubmit={handleManualSubmit} className="space-y-2">
             <label className="block text-xs font-semibold text-slate-700">
-              Input Scanner / Pencarian Barcode:
+              {t('scn_input_label')}
             </label>
             <div className="relative">
               <input
@@ -422,10 +423,10 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               </button>
             </div>
             <p className="text-[11px] text-slate-500 flex items-center justify-between">
-              <span>Menerima Barcode 12-digit (cth: 000000066145) atau Kode Aset (cth: IDN-8-2009-1396)</span>
+              <span>{t('scn_format_hint')}</span>
               {searchLatency !== null && (
                 <span className="text-emerald-700 font-mono text-[10px] font-bold">
-                  ⚡ Latensi: {searchLatency}ms
+                  {t('scn_latency', { ms: searchLatency })}
                 </span>
               )}
             </p>
@@ -455,7 +456,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                 }}
                 className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
               >
-                {doneLabel ?? 'Selesai'}
+                {doneLabel ?? t('scn_done')}
               </button>
             </div>
           )}
@@ -534,7 +535,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               {scannedMachine.pendingTransferId && (
                 <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-                  <span>Mesin dalam status IN TRANSIT (Transfer ID: {scannedMachine.pendingTransferId})</span>
+                  <span>{t('scn_in_transit', { id: scannedMachine.pendingTransferId })}</span>
                 </div>
               )}
 
@@ -542,7 +543,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
               {!hasSiteAccess && (
                 <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-                  <span>{getTranslation('no_site_access_error', language)} (Site: {scannedMachine.siteId})</span>
+                  <span>{getTranslation('no_site_access_error', language)} ({t('scn_site_label', { site: scannedMachine.siteId })})</span>
                 </div>
               )}
 

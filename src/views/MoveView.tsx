@@ -12,7 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 import { Machine, MachineStatus, Location } from '../types';
@@ -30,6 +30,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
   onSuccessDone,
 }) => {
   const { currentUser, language, canAccessSite } = useAuth();
+  const t = makeT(language);
 
   // Active machines to move (either batch or single)
   const machinesToMove: Machine[] = useMemo(() => {
@@ -83,21 +84,21 @@ export const MoveView: React.FC<MoveViewProps> = ({
     setFeedback(null);
 
     if (machinesToMove.length === 0) {
-      setFeedback({ type: 'error', message: 'Tidak ada mesin yang dipilih untuk dipindahkan.' });
+      setFeedback({ type: 'error', message: t('mv_err_none') });
       return;
     }
 
     const effectiveTargetLoc = selectedStatus === 'SOLD' ? (targetLocationId.trim() || 'SOLD') : targetLocationId.trim();
 
     if (!effectiveTargetLoc) {
-      setFeedback({ type: 'error', message: 'Silakan pilih lokasi tujuan.' });
+      setFeedback({ type: 'error', message: t('mv_err_no_target') });
       return;
     }
 
     if (!currentUser || isSubmitting) return;
 
     if (selectedStatus === 'LOANED' && (!loanTo.trim() || !loanDueDate.trim())) {
-      setFeedback({ type: 'error', message: 'Status LOANED wajib mengisi peminjam (Loan To) dan batas waktu (Due Date).' });
+      setFeedback({ type: 'error', message: t('mv_err_loan') });
       return;
     }
 
@@ -130,8 +131,8 @@ export const MoveView: React.FC<MoveViewProps> = ({
         setFeedback({
           type: 'success',
           message: selectedStatus === 'SOLD'
-            ? `Sukses memperbarui ${successCount} mesin menjadi status SOLD (Terjual/Keluar Pabrik)!`
-            : `Sukses memindahkan ${successCount} mesin ke ${effectiveTargetLoc}!`,
+            ? t('mvw_ok_sold', { n: successCount })
+            : t('mvw_ok_moved', { n: successCount, loc: effectiveTargetLoc }),
         });
         refreshMovements();
         setTimeout(() => {
@@ -139,11 +140,11 @@ export const MoveView: React.FC<MoveViewProps> = ({
         }, 1200);
       } else {
         soundService.playError();
-        setFeedback({ type: 'error', message: lastError || 'Gagal memindahkan mesin.' });
+        setFeedback({ type: 'error', message: lastError ? localizeMessage(lastError, language) : t('mv_err_move') });
       }
     } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: err.message || 'Terjadi kesalahan sistem.' });
+      setFeedback({ type: 'error', message: err.message ? localizeMessage(err.message, language) : t('mv_err_system') });
     } finally {
       setIsSubmitting(false);
     }
@@ -161,15 +162,15 @@ export const MoveView: React.FC<MoveViewProps> = ({
 
       if (res.success) {
         soundService.playSuccess();
-        setFeedback({ type: 'success', message: res.message });
+        setFeedback({ type: 'success', message: localizeMessage(res.message, language) });
         refreshMovements();
       } else {
         soundService.playError();
-        setFeedback({ type: 'error', message: res.message });
+        setFeedback({ type: 'error', message: localizeMessage(res.message, language) });
       }
     } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: err.message || 'Gagal membatalkan pemindahan.' });
+      setFeedback({ type: 'error', message: err.message ? localizeMessage(err.message, language) : t('mv_err_undo') });
     } finally {
       setUndoingAsset(null);
     }
@@ -188,7 +189,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
           </h1>
         </div>
         <p className="text-xs text-slate-500">
-          Pindahkan mesin ke Line, Line Extra, Gudang, atau Slot Rak WH2 (Kapasitas maks 3 mesin per slot).
+          {t('mv_desc')}
         </p>
       </div>
 
@@ -205,13 +206,13 @@ export const MoveView: React.FC<MoveViewProps> = ({
         {/* Selected Machines List */}
         <div className="space-y-2">
           <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-            <span>Mesin yang akan dipindahkan ({machinesToMove.length}):</span>
+            <span>{t('mvw_machines_to_move', { n: machinesToMove.length })}</span>
             <span className="text-[11px] text-slate-500 font-mono">Site: {currentSite}</span>
           </div>
 
           {machinesToMove.length === 0 ? (
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500">
-              Pilih mesin dari menu "Daftar Mesin" atau gunakan fitur Scan Barcode.
+              {t('mv_empty')}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -224,7 +225,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
                     <div className="font-mono font-bold text-emerald-700">{m.assetCode}</div>
                     <div className="font-semibold text-slate-900 truncate">{getMachineLabel(m).primary}</div>
                     <div className="text-[11px] text-slate-500">
-                      Lokasi Asal: <span className="font-mono font-bold text-amber-700">{m.locationId}</span>
+                      {t('mv_origin')} <span className="font-mono font-bold text-amber-700">{m.locationId}</span>
                     </div>
                   </div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
@@ -252,24 +253,24 @@ export const MoveView: React.FC<MoveViewProps> = ({
                     : 'border-slate-200'
                 }`}
               >
-                <option value="KEEP">-- Tetap (Tidak Mengubah Status) --</option>
-                <option value="ACTIVE">ACTIVE (Aktif)</option>
-                <option value="IN_REPAIR">IN_REPAIR (Sedang Diperbaiki)</option>
-                <option value="BROKEN">BROKEN (Rusak)</option>
-                <option value="LOANED">LOANED (Dipinjamkan)</option>
-                <option value="SOLD">SOLD (Dijual/Afkir)</option>
+                <option value="KEEP">{t('mv_status_keep')}</option>
+                <option value="ACTIVE">{t('mv_status_active')}</option>
+                <option value="IN_REPAIR">{t('mv_status_in_repair')}</option>
+                <option value="BROKEN">{t('mv_status_broken')}</option>
+                <option value="LOANED">{t('mv_status_loaned')}</option>
+                <option value="SOLD">{t('mv_status_sold')}</option>
               </select>
             </div>
 
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700">
-                {selectedStatus === 'SOLD' ? 'Catatan Penjualan / Pembeli (Opsional):' : `${getTranslation('reason', language)}:`}
+                {selectedStatus === 'SOLD' ? t('mv_sold_note') : `${getTranslation('reason', language)}:`}
               </label>
               <input
                 type="text"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder={selectedStatus === 'SOLD' ? 'Contoh: Dijual ke PT Subkon Jaya, No Faktur #123' : 'Contoh: Penyesuaian layout line order kemeja...'}
+                placeholder={selectedStatus === 'SOLD' ? t('mv_sold_note_ph') : t('mv_reason_ph')}
                 className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400"
               />
             </div>
@@ -280,10 +281,10 @@ export const MoveView: React.FC<MoveViewProps> = ({
             <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs space-y-1 animate-in fade-in">
               <div className="flex items-center gap-2 text-emerald-800 font-bold">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Status SOLD Terpilih — Tidak Perlu Memilih Lokasi di Site</span>
+                <span>{t('mv_sold_title')}</span>
               </div>
               <p className="text-slate-600 text-[11px]">
-                Mesin telah terjual atau dikeluarkan dari operasional pabrik. Lokasi mesin akan otomatis dicatat sebagai <strong className="font-mono text-emerald-700">SOLD</strong> tanpa memerlukan pemilihan rak atau line.
+                {t('mv_sold_desc_before')} <strong className="font-mono text-emerald-700">SOLD</strong> {t('mv_sold_desc_after')}
               </p>
             </div>
           )}
@@ -293,14 +294,14 @@ export const MoveView: React.FC<MoveViewProps> = ({
             <div className="space-y-3">
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-slate-800">
-                  {getTranslation('select_dest_location', language)} di Site {currentSite}:
+                  {getTranslation('select_dest_location', language)} {t('mvw_at_site', { site: currentSite })}:
                 </label>
                 <select
                   value={targetLocationId}
                   onChange={(e) => setTargetLocationId(e.target.value)}
                   className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl px-4 py-3 text-sm text-slate-900 font-mono shadow-xs"
                 >
-                  <option value="">-- Pilih Lokasi Tujuan --</option>
+                  <option value="">{t('mvw_pick_target')}</option>
                   {availableLocations.map((loc) => (
                     <option key={loc.locationId} value={loc.locationId}>
                       {loc.locationId} ({loc.displayName}) - {loc.type}
@@ -319,9 +320,9 @@ export const MoveView: React.FC<MoveViewProps> = ({
                   }`}
                 >
                   <div className="flex items-center justify-between font-bold">
-                    <span>Kapasitas Slot Rak WH2:</span>
+                    <span>{t('mv_slot_capacity')}</span>
                     <span className="font-mono">
-                      {slotOccupancy.current} / {slotOccupancy.limit} Mesin
+                      {slotOccupancy.current} / {slotOccupancy.limit} {t('mvw_machine_unit')}
                     </span>
                   </div>
                   <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -342,9 +343,9 @@ export const MoveView: React.FC<MoveViewProps> = ({
             </div>
           ) : (
             <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-              <span className="text-slate-600">Lokasi Tujuan:</span>
+              <span className="text-slate-600">{t('mv_target')}</span>
               <span className="font-mono font-bold text-emerald-800 bg-emerald-100 px-3 py-1 rounded-lg border border-emerald-200">
-                Otomatis Diset: SOLD
+                {t('mv_auto_sold')}
               </span>
             </div>
           )}
@@ -354,20 +355,20 @@ export const MoveView: React.FC<MoveViewProps> = ({
             <div className="p-4 rounded-xl bg-purple-50 border border-purple-200 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
                 <label className="block text-purple-900 font-semibold mb-1">
-                  Peminjam (Loan To) *:
+                  {t('mv_loan_to')}
                 </label>
                 <input
                   type="text"
                   value={loanTo}
                   onChange={(e) => setLoanTo(e.target.value)}
-                  placeholder="Nama subkontraktor / pabrik lain"
+                  placeholder={t('mv_loan_to_ph')}
                   className="w-full bg-white border border-purple-200 rounded-lg px-3 py-1.5 text-slate-900"
                   required
                 />
               </div>
               <div>
                 <label className="block text-purple-900 font-semibold mb-1">
-                  Batas Waktu Pinjam (Due Date) *:
+                  {t('mv_loan_due')}
                 </label>
                 <input
                   type="date"
@@ -411,10 +412,10 @@ export const MoveView: React.FC<MoveViewProps> = ({
             <Layers className="w-4 h-4" />
             <span>
               {isSubmitting
-                ? 'Sedang Menyimpan ke Server...'
+                ? t('mv_saving')
                 : selectedStatus === 'SOLD'
-                ? `Konfirmasi Status SOLD (${machinesToMove.length} Mesin)`
-                : `Simpan Pemindahan (${machinesToMove.length} Mesin)`}
+                ? t('mvw_confirm_sold', { n: machinesToMove.length })
+                : t('mvw_save_move', { n: machinesToMove.length })}
             </span>
           </button>
         </form>
@@ -430,7 +431,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
             </h3>
           </div>
           <span className="text-xs text-slate-500">
-            {getTranslation('undo_available_within', language)} ({undoTimeLimitMinutes} menit)
+            {getTranslation('undo_available_within', language)} ({t('mvw_minutes', { n: undoTimeLimitMinutes })})
           </span>
         </div>
 
@@ -456,7 +457,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
                     </span>
                   </div>
                   <div className="text-[10px] text-slate-500">
-                    Oleh: {mov.byUser} • {new Date(mov.timestamp).toLocaleTimeString('id-ID')}
+                    {t('mvw_by')} {mov.byUser} • {new Date(mov.timestamp).toLocaleTimeString(localeOf(language))}
                   </div>
                 </div>
 
@@ -467,7 +468,7 @@ export const MoveView: React.FC<MoveViewProps> = ({
                   className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 disabled:opacity-50 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>{undoingAsset === mov.assetCode ? 'Membatalkan...' : 'Undo Pemindahan'}</span>
+                  <span>{undoingAsset === mov.assetCode ? t('mvw_undoing') : t('mv_undo_button')}</span>
                 </button>
               </div>
             ))}

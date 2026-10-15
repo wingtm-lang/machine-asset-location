@@ -17,7 +17,7 @@ import {
   Grid,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
 import { Machine, SiteId, MachineStatus, MachineListFilter } from '../types';
@@ -42,7 +42,7 @@ const STATUS_PILLS = [
 const CARD_BTN =
   'text-left w-full cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 hover:border-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500';
 
-function formatWibTimestamp(timestampStr: string): string {
+function formatWibTimestamp(timestampStr: string, lang: 'id' | 'en'): string {
   if (!timestampStr) return '-';
   try {
     // Parse timestamp sebagai WIB: new Date(timestamp.replace(' ', 'T') + '+07:00')
@@ -56,11 +56,11 @@ function formatWibTimestamp(timestampStr: string): string {
       date.getFullYear() === now.getFullYear();
 
     if (isToday) {
-      return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString(localeOf(lang), { hour: '2-digit', minute: '2-digit' });
     } else {
       const day = String(date.getDate()).padStart(2, '0');
-      const month = date.toLocaleString('id-ID', { month: 'short' });
-      const time = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      const month = date.toLocaleString(localeOf(lang), { month: 'short' });
+      const time = date.toLocaleTimeString(localeOf(lang), { hour: '2-digit', minute: '2-digit' });
       return `${day} ${month} ${time}`;
     }
   } catch {
@@ -75,6 +75,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenScanner,
 }) => {
   const { currentUser, language, canPerformAction, canAccessSite } = useAuth();
+  const t = makeT(language);
   const machines = storageService.getAllMachines();
   const sites = storageService.getSites();
   const transfers = storageService.getTransfers();
@@ -93,14 +94,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (res && res.success) {
         setServerMovements(Array.isArray(res.movements) ? res.movements.slice(0, 5) : []);
       } else {
-        setMovementsError(res?.message || 'Gagal memuat riwayat mutasi dari server.');
+        setMovementsError(res?.message ? localizeMessage(res.message, language) : t('dash_load_failed'));
       }
     } catch (err: any) {
-      setMovementsError(err.message || 'Tidak dapat terhubung ke server.');
+      setMovementsError(err.message ? localizeMessage(err.message, language) : t('dash_no_connect'));
     } finally {
       setIsLoadingMovements(false);
     }
-  }, []);
+  }, [language]);
 
   // Fetch on mount
   useEffect(() => {
@@ -128,14 +129,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     try {
       const res = await storageService.syncFromGoogleSheet(undefined, 'machine_asset');
       if (res.success) {
-        setSyncToast(`Berhasil menarik ${res.count} data mesin dari Google Spreadsheet (${res.source})!`);
+        setSyncToast(t('dash_sync_ok', { n: res.count, source: res.source }));
         setTimeout(() => setSyncToast(null), 5000);
       } else {
-        setSyncToast(`Gagal: ${res.message}`);
+        setSyncToast(t('dash_sync_fail', { msg: localizeMessage(res.message, language) }));
         setTimeout(() => setSyncToast(null), 7000);
       }
     } catch (e: any) {
-      setSyncToast('Gagal: ' + e.message);
+      setSyncToast(t('dash_sync_fail', { msg: localizeMessage(e.message, language) }));
       setTimeout(() => setSyncToast(null), 5000);
     } finally {
       setIsSyncing(false);
@@ -222,16 +223,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 PT.WINNERS Asset System
               </span>
               <span className="text-xs text-sky-100/80 font-mono">
-                Site Access: {currentUser?.siteAccess.join(', ')}
+                {t('dash_site_access', { sites: currentUser?.siteAccess.join(', ') ?? '' })}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               {getTranslation('dashboard', language)} — {currentUser?.displayName}
             </h1>
             <p className="text-xs sm:text-sm text-sky-50/90">
-              {isViewer
-                ? 'Ringkasan Eksekutif & Distribusi Aset Mesin Jahit Pabrik'
-                : 'Pusat Kontrol Pelacakan & Mutasi Aset Mesin Jahit (PW1, PW2, PW3, WH2, SW, QA)'}
+              {isViewer ? t('dash_sub_viewer') : t('dash_sub_default')}
             </p>
           </div>
 
@@ -257,10 +256,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               onClick={() => onNavigateTab('rackmap')}
               className="px-4 py-2.5 bg-teal-950/70 hover:bg-teal-900 text-teal-100 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-teal-400/30"
-              title="Buka Denah & Mapping Posisi Mesin di Rak Gudang WH2"
+              title={t('dash_rackmap_title')}
             >
               <Grid className="w-4 h-4 text-teal-300" />
-              <span>Mapping Rak WH2</span>
+              <span>{t('dash_rackmap')}</span>
             </button>
 
             {canPerformAction('OPNAME') && (
@@ -277,10 +276,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={handleSyncFromSheet}
               disabled={isSyncing}
               className="px-4 py-2.5 bg-sky-950/80 hover:bg-sky-950 disabled:opacity-50 text-sky-100 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-sky-300/30"
-              title="Tarik data terbaru dari Google Spreadsheet tab 'machine_asset'"
+              title={t('dash_sync_title')}
             >
               <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Menyinkronkan...' : 'Sync Data'}</span>
+              <span>{isSyncing ? t('dash_syncing') : t('dash_sync_btn')}</span>
             </button>
           </div>
         </div>
@@ -301,15 +300,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  Database Bersih (0 Data Dummy)
+                  {t('dash_empty_badge')}
                 </span>
-                <span className="text-xs font-mono text-slate-500">Siap untuk data real</span>
+                <span className="text-xs font-mono text-slate-500">{t('dash_empty_ready')}</span>
               </div>
               <h2 className="text-base sm:text-lg font-black text-slate-900">
-                Sinkronkan Data Mesin dari Google Spreadsheet ("machine_asset")
+                {t('dash_empty_title')}
               </h2>
               <p className="text-xs text-slate-600">
-                Data dummy telah dibersihkan. Klik tombol di samping untuk memuat seluruh daftar aset mesin resmi PT.WINNERS langsung dari Google Spreadsheet ID <span className="font-mono text-emerald-700 font-bold">1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio</span>.
+                {t('dash_empty_desc')} <span className="font-mono text-emerald-700 font-bold">1-D87s2xI6ERVQydmP1Gbmj7XzqB5o7Ziib7mvKVhtio</span>.
               </p>
             </div>
 
@@ -319,7 +318,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-xs shadow-sm flex items-center justify-center gap-2 shrink-0 transition-transform hover:scale-105 active:scale-95"
             >
               <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Sedang Menarik Data...' : 'Tarik Data dari Sheet Sekarang'}</span>
+              <span>{isSyncing ? t('dash_pulling') : t('dash_pull_now')}</span>
             </button>
           </div>
         </div>
@@ -335,7 +334,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {getTranslation('overdue_alert', language)}
               </div>
               <div className="text-rose-700">
-                Terdapat {overdueTransfers.length} mesin berstatus In Transit lebih dari 3 hari belum diterima oleh site tujuan.
+                {t('dash_overdue_desc', { n: overdueTransfers.length })}
               </div>
             </div>
           </div>
@@ -343,7 +342,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             onClick={() => onNavigateTab('transfers')}
             className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold text-xs whitespace-nowrap self-start sm:self-auto shadow-xs"
           >
-            Periksa Transfer
+            {t('dash_check_transfers')}
           </button>
         </div>
       )}
@@ -357,7 +356,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>Total Mesin Dikelola</span>
+            <span>{t('dash_total_managed')}</span>
             <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
               <Boxes className="w-4 h-4" />
             </div>
@@ -366,7 +365,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {accessibleMachines.length.toLocaleString()}
           </div>
           <div className="text-[11px] text-slate-500">
-            Dari total {machines.length.toLocaleString()} aset perusahaan
+            {t('dash_of_total', { n: machines.length.toLocaleString() })}
           </div>
         </button>
 
@@ -377,7 +376,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>Mesin Aktif (Operasi)</span>
+            <span>{t('dash_active_ops')}</span>
             <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <CheckCircle2 className="w-4 h-4" />
             </div>
@@ -386,7 +385,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {statusCounts.ACTIVE.toLocaleString()}
           </div>
           <div className="text-[11px] text-emerald-700 font-medium">
-            {((statusCounts.ACTIVE / (accessibleMachines.length || 1)) * 100).toFixed(1)}% Operasional
+            {t('dash_operational', { pct: ((statusCounts.ACTIVE / (accessibleMachines.length || 1)) * 100).toFixed(1) })}
           </div>
         </button>
 
@@ -397,7 +396,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>In Transit / Transfer</span>
+            <span>{t('dash_in_transit_card')}</span>
             <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
               <ArrowRightLeft className="w-4 h-4" />
             </div>
@@ -406,7 +405,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {statusCounts.IN_TRANSIT.toLocaleString()}
           </div>
           <div className="text-[11px] text-amber-700">
-            {overdueTransfers.length > 0 ? `${overdueTransfers.length} terlambat` : 'Semua tepat waktu'}
+            {overdueTransfers.length > 0 ? t('dash_late', { n: overdueTransfers.length }) : t('dash_all_on_time')}
           </div>
         </button>
 
@@ -417,7 +416,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           className={`p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-1 ${CARD_BTN}`}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>Perbaikan & Rusak</span>
+            <span>{t('dash_repair_broken')}</span>
             <div className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
               <Activity className="w-4 h-4" />
             </div>
@@ -426,7 +425,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {(statusCounts.BROKEN + statusCounts.IN_REPAIR).toLocaleString()}
           </div>
           <div className="text-[11px] text-slate-500">
-            {statusCounts.IN_REPAIR} Diperbaiki • {statusCounts.BROKEN} Rusak
+            {t('dash_repair_broken_sub', { repair: statusCounts.IN_REPAIR, broken: statusCounts.BROKEN })}
           </div>
         </button>
       </div>
@@ -436,9 +435,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <Building2 className="w-4 h-4 text-emerald-700" />
-            <span>Distribusi Mesin Per Site (Pabrik & Gudang)</span>
+            <span>{t('dash_site_dist')}</span>
           </h2>
-          <span className="text-xs text-slate-500">Klik site untuk filter</span>
+          <span className="text-xs text-slate-500">{t('dash_click_site')}</span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -480,7 +479,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
               <Boxes className="w-4 h-4 text-emerald-700" />
-              <span>Populasi Jenis Mesin Utama (Standard Machine Names)</span>
+              <span>{t('dash_type_pop')}</span>
             </h3>
             <span className="text-xs text-slate-500 font-mono">Top 8</span>
           </div>
@@ -519,7 +518,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-4">
             <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-700" />
-              <span>Rangkuman Status Mesin</span>
+              <span>{t('dash_status_summary')}</span>
             </h3>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
@@ -544,14 +543,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
                 <Clock className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
-                <span>Aktivitas Mutasi Terkini</span>
+                <span>{t('dash_recent_moves')}</span>
               </h3>
               <button
                 type="button"
                 onClick={() => onNavigateTab('history')}
                 className="text-xs text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 font-bold transition-colors cursor-pointer"
               >
-                Lihat Semua
+                {t('dash_view_all')}
               </button>
             </div>
 
@@ -585,7 +584,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   onClick={fetchRecentMovements}
                   className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-bold text-xs hover:bg-rose-500 transition-colors shrink-0 cursor-pointer"
                 >
-                  Coba lagi
+                  {t('dash_retry')}
                 </button>
               </div>
             )}
@@ -593,7 +592,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {/* Empty state */}
             {!isLoadingMovements && !movementsError && serverMovements.length === 0 && (
               <div className="p-6 text-center text-slate-400 dark:text-slate-500 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-                Belum ada riwayat untuk site Anda
+                {t('hist_empty_title')}
               </div>
             )}
 
@@ -624,7 +623,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </span>
                           {isUndone && (
                             <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                              Dibatalkan
+                              {t('hist_undone')}
                             </span>
                           )}
                         </div>
@@ -645,7 +644,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                       <div className="text-right shrink-0 space-y-0.5">
                         <div className="text-[11px] font-mono text-slate-600 dark:text-slate-400 font-semibold">
-                          {formatWibTimestamp(mov.timestamp)}
+                          {formatWibTimestamp(mov.timestamp, language)}
                         </div>
                         {mov.movedBy && (
                           <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate max-w-[90px]">

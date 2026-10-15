@@ -810,21 +810,43 @@ class StorageService {
 
   public async cancelTransfer(
     transferId: string,
-    _username: string,
-    _userSiteAccess: string[]
+    _username?: string,
+    _userSiteAccess?: string[]
   ): Promise<{ success: boolean; message: string }> {
-    const meta = this.transferMeta.get(transferId);
-    if (!meta) return { success: false, message: 'Transfer tidak ditemukan. Muat ulang data lalu coba lagi.' };
-    const res = await this.rpc('cancel_transfer', {
-      p_transfer_id: meta.orderId,
-      p_asset_codes: [meta.assetCode],
-      p_request_id: uuid(),
-    });
-    if (!res.success) return { success: false, message: res.message };
-    await this.afterMutation([meta.assetCode]);
-    return { success: true, message: res.message };
+    return this.cancelTransfers([transferId]);
   }
 
+  
+  /** Batalkan beberapa mesin sekaligus (semua baris transfer yang masih In Transit dalam satu batch). */
+  public async cancelTransfers(transferIds: string[]): Promise<{ success: boolean; message: string }> {
+    const byOrder = new Map<number, string[]>();
+    for (const id of transferIds) {
+      const meta = this.transferMeta.get(id);
+      if (!meta) return { success: false, message: 'Transfer tidak ditemukan. Muat ulang data lalu coba lagi.' };
+      const codes = byOrder.get(meta.orderId) ?? [];
+      codes.push(meta.assetCode);
+      byOrder.set(meta.orderId, codes);
+    }
+    if (byOrder.size === 0) return { success: false, message: 'Pilih minimal satu mesin.' };
+    const allCodes: string[] = [];
+    let lastMessage = '';
+    for (const [orderId, codes] of byOrder) {
+      const res = await this.rpc('cancel_transfer', {
+        p_transfer_id: orderId,
+        p_asset_codes: codes,
+        p_request_id: uuid(),
+      });
+      if (!res.success) {
+        if (allCodes.length) await this.afterMutation(allCodes);
+        return { success: false, message: res.message };
+      }
+      allCodes.push(...codes);
+      lastMessage = res.message;
+    }
+    await this.afterMutation(allCodes);
+    return { success: true, message: lastMessage };
+  }
+  
   private async resolveSessionId(sessionNo: string): Promise<number | null> {
     const { data, error } = await supabase.from('opname_sessions').select('id').eq('session_no', sessionNo).limit(1);
     if (error) return null;

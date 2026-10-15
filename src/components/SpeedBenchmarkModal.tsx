@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Zap, CheckCircle2, Play, Activity, Database } from 'lucide-react';
 import { storageService } from '../services/storage';
+import { useAuth } from '../services/authContext';
+import { makeT } from '../services/translations';
 
 interface SpeedBenchmarkModalProps {
   isOpen: boolean;
@@ -21,6 +23,8 @@ interface BenchmarkResult {
 export const SpeedBenchmarkModal: React.FC<SpeedBenchmarkModalProps> = ({ isOpen, onClose }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<BenchmarkResult | null>(null);
+  const { language } = useAuth();
+  const t = makeT(language);
 
   if (!isOpen) return null;
 
@@ -86,10 +90,10 @@ export const SpeedBenchmarkModal: React.FC<SpeedBenchmarkModalProps> = ({ isOpen
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-900">
-                Fase 0 #3 — Uji Kecepatan Pencarian Mesin
+                {t('shell_bench_title')}
               </h3>
               <p className="text-xs text-slate-500">
-                Uji latensi lookup Barcode & Kode Aset pada {storageService.getTotalMachineCount()} mesin
+                {t('shell_bench_subtitle', { n: storageService.getTotalMachineCount() })}
               </p>
             </div>
           </div>
@@ -107,11 +111,10 @@ export const SpeedBenchmarkModal: React.FC<SpeedBenchmarkModalProps> = ({ isOpen
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-2">
             <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
               <Database className="w-4 h-4 text-blue-600" />
-              <span>Kriteria Lulus Fase 0: Pencarian Barcode di bawah 2 detik (&lt; 2000 ms)</span>
+              <span>{t('shell_bench_criteria')}</span>
             </div>
             <p className="text-slate-500 leading-relaxed">
-              Pengujian ini melakukan 100 iterasi pencarian acak berurutan terhadap seluruh database
-              mesin PT.WINNERS menggunakan indeks O(1) hash map termutakhir.
+              {t('shell_bench_desc')}
             </p>
           </div>
 
@@ -125,12 +128,12 @@ export const SpeedBenchmarkModal: React.FC<SpeedBenchmarkModalProps> = ({ isOpen
               {isRunning ? (
                 <>
                   <Activity className="w-5 h-5 animate-spin" />
-                  <span>Sedang Menguji 100 Query...</span>
+                  <span>{t('shell_bench_running')}</span>
                 </>
               ) : (
                 <>
                   <Play className="w-5 h-5 fill-slate-950" />
-                  <span>Jalankan Uji Kecepatan Sekarang</span>
+                  <span>{t('shell_bench_run')}</span>
                 </>
               )}
             </button>
@@ -151,10 +154,10 @@ export const SpeedBenchmarkModal: React.FC<SpeedBenchmarkModalProps> = ({ isOpen
                   <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
                   <div>
                     <div className="font-bold text-sm text-slate-900">
-                      {result.passed ? 'LULUS KRITERIA FASE 0' : 'TIDAK LULUS'}
+                      {result.passed ? t('shell_bench_pass') : t('shell_bench_fail')}
                     </div>
                     <div className="text-xs text-slate-600">
-                      Rata-rata {result.avgTimeMs} ms per pencarian (jauh lebih cepat dari batas 2.000 ms)
+                      {t('shell_bench_avg', { ms: result.avgTimeMs })}
                     </div>
                   </div>
                 </div>
@@ -171,25 +174,25 @@ export const SpeedBenchmarkModal: React.FC<SpeedBenchmarkModalProps> = ({ isOpen
               {/* Metrics Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-                  <div className="text-slate-500 font-medium">Total Mesin</div>
+                  <div className="text-slate-500 font-medium">{t('shell_bench_total')}</div>
                   <div className="text-lg font-bold text-slate-900 font-mono mt-1">
                     {result.totalMachines.toLocaleString()}
                   </div>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-                  <div className="text-slate-500 font-medium">Tercepat (Min)</div>
+                  <div className="text-slate-500 font-medium">{t('shell_bench_min')}</div>
                   <div className="text-lg font-bold text-cyan-700 font-mono mt-1">
                     {result.minTimeMs} ms
                   </div>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-                  <div className="text-slate-500 font-medium">P95 Latensi</div>
+                  <div className="text-slate-500 font-medium">{t('shell_bench_p95')}</div>
                   <div className="text-lg font-bold text-amber-700 font-mono mt-1">
                     {result.p95TimeMs} ms
                   </div>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-                  <div className="text-slate-500 font-medium">Terlama (Max)</div>
+                  <div className="text-slate-500 font-medium">{t('shell_bench_max')}</div>
                   <div className="text-lg font-bold text-purple-700 font-mono mt-1">
                     {result.maxTimeMs} ms
                   </div>
@@ -198,14 +201,14 @@ export const SpeedBenchmarkModal: React.FC<SpeedBenchmarkModalProps> = ({ isOpen
 
               {/* Sample Queries Table */}
               <div className="space-y-2">
-                <div className="text-xs font-bold text-slate-700">Sampel Query Teruji:</div>
+                <div className="text-xs font-bold text-slate-700">{t('shell_bench_samples')}</div>
                 <div className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
                   <table className="w-full text-left text-xs font-mono">
                     <thead className="bg-slate-100 text-slate-600 text-[10px] uppercase">
                       <tr>
                         <th className="px-3 py-2">Query (Barcode / Asset Code)</th>
-                        <th className="px-3 py-2">Mesin Teridentifikasi</th>
-                        <th className="px-3 py-2 text-right">Latensi</th>
+                        <th className="px-3 py-2">{t('shell_bench_col_machine')}</th>
+                        <th className="px-3 py-2 text-right">{t('shell_bench_col_latency')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 text-slate-700 bg-white">

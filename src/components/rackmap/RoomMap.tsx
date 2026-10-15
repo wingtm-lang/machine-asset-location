@@ -1,5 +1,7 @@
 import React from 'react';
 import { WH2_RACKS, RackConfig, RackSlotItem } from '../../services/rackMapService';
+import { useAuth } from '../../services/authContext';
+import { makeT } from '../../services/translations';
 
 interface RoomMapProps {
   selectedRack: RackConfig | null;
@@ -12,6 +14,9 @@ export const RoomMap: React.FC<RoomMapProps> = ({
   onSelectRack,
   slots,
 }) => {
+  const { language } = useAuth();
+  const t = makeT(language);
+
   // Hitung jumlah slot terisi per rak
   const getRackFilledCount = (rackId: string): number => {
     return slots.filter((s) => s.rak === rackId).length;
@@ -69,7 +74,7 @@ export const RoomMap: React.FC<RoomMapProps> = ({
                   width: `${rack.w}%`,
                   height: `${rack.h}%`,
                 }}
-                title={`Rak ${rack.id}: ${filledCount}/${totalCapacity} terisi (${fillPercent}%)`}
+                title={t('rm_rack_tip', { id: rack.id, filled: filledCount, total: totalCapacity, pct: fillPercent })}
               >
                 {/* Visual isian warna dari bawah (progress fill) */}
                 <div

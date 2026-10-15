@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './services/authContext';
+import { makeT, localizeMessage } from './services/translations';
 import { storageService } from './services/storage';
 import { AppHeader } from './components/AppHeader';
 import { Sidebar } from './components/Sidebar';
@@ -11,6 +12,7 @@ import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { LogoutModal } from './components/LogoutModal';
 import { ScannerModal } from './components/ScannerModal';
 import { MachineDetailModal } from './components/MachineDetailModal';
+import { SpeedBenchmarkModal } from './components/SpeedBenchmarkModal';
 import { DashboardView } from './views/DashboardView';
 import { MachinesListView } from './views/MachinesListView';
 import { MoveView } from './views/MoveView';
@@ -37,7 +39,9 @@ const MainAppInner: React.FC = () => {
     canAddUser,
     canUseRackMap,
     canPerformAction,
+    language,
   } = useAuth();
+  const t = makeT(language);
 
   // Navigation state: Default to 'home' (Beranda)
   const [activeTab, setActiveTab] = useState<string>('home');
@@ -66,18 +70,11 @@ const MainAppInner: React.FC = () => {
     }
   }, [isLoadingSession, currentUser?.username]);
 
-  // Reset ke Beranda saat logout, agar login berikutnya (di tab/sesi yang sama) tidak
-  // "nyangkut" di tab terakhir sebelum logout (mis. Admin GAS).
-  useEffect(() => {
-    if (!isLoadingSession && !currentUser) {
-      setActiveTab('home');
-    }
-  }, [isLoadingSession, currentUser]);
-
   // Modals state
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState<boolean>(false);
   const [isLogoutOpen, setIsLogoutOpen] = useState<boolean>(false);
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
+  const [isBenchmarkOpen, setIsBenchmarkOpen] = useState<boolean>(false);
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState<boolean>(false);
 
@@ -119,7 +116,7 @@ const MainAppInner: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#0c2e57] flex flex-col items-center justify-center text-white space-y-3 font-mono">
         <Loader2 className="w-8 h-8 animate-spin text-[#ffd23f]" />
-        <div className="text-sm font-semibold tracking-wider">Memeriksa sesi...</div>
+        <div className="text-sm font-semibold tracking-wider">{t('shell_checking_session')}</div>
       </div>
     );
   }
@@ -140,7 +137,7 @@ const MainAppInner: React.FC = () => {
               }`}
             >
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-              <span className="flex-1">{authToast.text}</span>
+              <span className="flex-1">{localizeMessage(authToast.text, language)}</span>
               <button
                 type="button"
                 onClick={clearAuthToast}
@@ -163,6 +160,7 @@ const MainAppInner: React.FC = () => {
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         onOpenScanner={() => setIsScannerOpen(true)}
+        onOpenBenchmark={() => setIsBenchmarkOpen(true)}
         onOpenChangePassword={() => setIsChangePasswordOpen(true)}
         onOpenLogout={() => setIsLogoutOpen(true)}
         isOpenMobile={isMobileSidebarOpen}
@@ -177,6 +175,7 @@ const MainAppInner: React.FC = () => {
           isSyncing={isSyncing}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           onOpenScanner={() => setIsScannerOpen(true)}
+          onOpenBenchmark={() => setIsBenchmarkOpen(true)}
           onOpenChangePassword={() => setIsChangePasswordOpen(true)}
           onOpenLogout={() => setIsLogoutOpen(true)}
         />
@@ -188,6 +187,7 @@ const MainAppInner: React.FC = () => {
           <HomeView
             onNavigateTab={setActiveTab}
             onOpenScanner={() => setIsScannerOpen(true)}
+            onOpenBenchmark={() => setIsBenchmarkOpen(true)}
           />
         )}
 
@@ -201,18 +201,17 @@ const MainAppInner: React.FC = () => {
                 <ShieldAlert className="w-8 h-8" />
               </div>
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                Anda tidak memiliki akses ke halaman ini
+                {t('shell_no_access_title')}
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
-                Akun Anda ({currentUser.role}) dibatasi hanya untuk site {currentUser.siteAccess.join(', ')}.
-                Modul WH2 Rack Map khusus untuk pengguna Warehouse 2 (Admin Master &amp; All Sites).
+                {t('shell_no_access_rackmap', { role: currentUser.role, sites: currentUser.siteAccess.join(', ') })}
               </p>
               <button
                 type="button"
                 onClick={() => setActiveTab('home')}
                 className="mt-6 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer"
               >
-                Kembali ke Beranda
+                {t('shell_back_home')}
               </button>
             </div>
           )
@@ -285,18 +284,17 @@ const MainAppInner: React.FC = () => {
                 <ShieldAlert className="w-8 h-8" />
               </div>
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                Anda tidak memiliki akses ke halaman ini
+                {t('shell_no_access_title')}
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
-                Akun Anda ({currentUser.role}) dibatasi hanya untuk site {currentUser.siteAccess.join(', ')}.
-                Modul Laporan Harian khusus untuk Admin Master dan All Sites.
+                {t('shell_no_access_reports', { role: currentUser.role, sites: currentUser.siteAccess.join(', ') })}
               </p>
               <button
                 type="button"
                 onClick={() => setActiveTab('home')}
                 className="mt-6 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer"
               >
-                Kembali ke Beranda
+                {t('shell_back_home')}
               </button>
             </div>
           )
@@ -326,6 +324,12 @@ const MainAppInner: React.FC = () => {
         onQuickMove={handleMoveSingle}
       />
 
+      {/* Speed Benchmark Modal */}
+      <SpeedBenchmarkModal
+        isOpen={isBenchmarkOpen}
+        onClose={() => setIsBenchmarkOpen(false)}
+      />
+
       {/* Machine Detail Modal */}
       <MachineDetailModal
         machine={selectedMachine}
@@ -353,7 +357,7 @@ const MainAppInner: React.FC = () => {
             ) : (
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             )}
-            <span className="flex-1">{authToast.text}</span>
+            <span className="flex-1">{localizeMessage(authToast.text, language)}</span>
             <button
               type="button"
               onClick={clearAuthToast}

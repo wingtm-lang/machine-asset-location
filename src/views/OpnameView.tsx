@@ -32,7 +32,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 
@@ -72,6 +72,11 @@ export interface OpnameViewProps {
 
 export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
   const { currentUser, language, canAccessSite } = useAuth();
+  const t = makeT(language);
+  const tRef = useRef(t);
+  tRef.current = t;
+  const langRef = useRef(language);
+  langRef.current = language;
   const allSites = storageService.getSites();
 
   // Role calculation
@@ -195,11 +200,11 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
       if (res && res.success && Array.isArray(res.sessions)) {
         setServerSessions(res.sessions);
       } else {
-        const errMsg = res?.message || 'Gagal memuat daftar sesi dari server.';
+        const errMsg = res?.message ? localizeMessage(res.message, langRef.current) : tRef.current('op_err_load_sessions');
         setSessionsFetchError(errMsg);
       }
     } catch (err: any) {
-      const errMsg = err.message || 'Tidak dapat terhubung ke server.';
+      const errMsg = err.message ? localizeMessage(err.message, langRef.current) : tRef.current('server_unreachable');
       setSessionsFetchError(errMsg);
     } finally {
       setIsLoadingSessions(false);
@@ -244,17 +249,17 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
 
       if (res && res.success && res.session) {
         soundService.playSuccess();
-        addToast('success', res.message || `Sesi ${res.session.sessionId} berhasil dimulai di server!`);
+        addToast('success', res.message ? localizeMessage(res.message, language) : t('op_toast_started', { id: res.session.sessionId }));
         setActiveSession(res.session);
         setScannedItems([]);
         fetchSessions();
       } else {
         soundService.playError();
-        addToast('error', res?.message || 'Gagal memulai sesi di server.');
+        addToast('error', res?.message ? localizeMessage(res.message, language) : t('op_err_start'));
       }
     } catch (err: any) {
       soundService.playError();
-      addToast('error', err.message || 'Tidak dapat terhubung ke server.');
+      addToast('error', err.message ? localizeMessage(err.message, language) : t('server_unreachable'));
     } finally {
       setIsStartingSession(false);
     }
@@ -268,7 +273,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     }
     setSelectedSiteId(session.siteId);
     soundService.playSuccess();
-    addToast('info', `Melanjutkan sesi ${session.sessionId} (${session.siteId})`);
+    addToast('info', t('op_resuming', { id: session.sessionId, site: session.siteId }));
   };
 
   // Open "Atur Akses" Modal
@@ -294,7 +299,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
 
       if (res && res.success) {
         soundService.playSuccess();
-        addToast('success', res.message || 'Pengaturan akses sesi berhasil diperbarui!');
+        addToast('success', res.message ? localizeMessage(res.message, language) : t('op_toast_access_updated'));
         // Update activeSession if currently running
         if (activeSession && activeSession.sessionId === editingSession.sessionId) {
           setActiveSession((prev) =>
@@ -311,11 +316,11 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
         fetchSessions();
       } else {
         soundService.playError();
-        addToast('error', res?.message || 'Gagal memperbarui akses sesi.');
+        addToast('error', res?.message ? localizeMessage(res.message, language) : t('op_err_access'));
       }
     } catch (err: any) {
       soundService.playError();
-      addToast('error', err.message || 'Gagal menghubungi server.');
+      addToast('error', err.message ? localizeMessage(err.message, language) : t('op_err_contact'));
     } finally {
       setIsUpdatingAccess(false);
     }
@@ -330,7 +335,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     // Check duplicate in current session
     if (scannedItems.some((i) => i.barcode === clean || i.assetCode.toUpperCase() === clean.toUpperCase())) {
       soundService.playWarning();
-      addToast('warning', `Kode ${clean} sudah pernah di-scan pada sesi ini.`);
+      addToast('warning', t('op_dup_scan', { code: clean }));
       setInputScanCode('');
       return;
     }
@@ -415,14 +420,14 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             i.assetCode === item.assetCode ? { ...i, result: 'MATCH', resolution: 'MOVED_HERE' } : i
           )
         );
-        addToast('success', `Mesin ${item.assetCode} berhasil dipindahkan ke ${targetLoc}.`);
+        addToast('success', t('op_toast_moved', { code: item.assetCode, loc: targetLoc }));
       } else {
         soundService.playError();
-        addToast('error', res.message || 'Gagal memindahkan mesin di server.');
+        addToast('error', res.message ? localizeMessage(res.message, language) : t('op_err_move'));
       }
     } catch (err: any) {
       soundService.playError();
-      addToast('error', err.message || 'Tidak dapat terhubung ke server.');
+      addToast('error', err.message ? localizeMessage(err.message, language) : t('server_unreachable'));
     } finally {
       setRelocatingCode(null);
     }
@@ -452,19 +457,19 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
         addToast(
           'success',
           status === 'COMPLETED'
-            ? 'Sesi Weekly Machine List berhasil diselesaikan dan disimpan di server!'
-            : 'Sesi berhasil dibatalkan.'
+            ? t('op_toast_completed')
+            : t('op_toast_cancelled')
         );
         setActiveSession(null);
         setScannedItems([]);
         fetchSessions();
       } else {
         soundService.playError();
-        addToast('error', res?.message || 'Gagal menutup sesi di server. Sesi tetap terbuka.');
+        addToast('error', res?.message ? localizeMessage(res.message, language) : t('op_err_close'));
       }
     } catch (err: any) {
       soundService.playError();
-      addToast('error', err.message || 'Tidak dapat terhubung ke server. Sesi tetap terbuka.');
+      addToast('error', err.message ? localizeMessage(err.message, language) : t('op_err_unreachable_open'));
     } finally {
       setIsFinishingSession(false);
     }
@@ -524,7 +529,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 Weekly Machine List
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Sistem audit & rekonsiliasi mesin mingguan dengan sinkronisasi langsung di Server.
+                {t('op_subtitle')}
               </p>
             </div>
           </div>
@@ -534,10 +539,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             onClick={fetchSessions}
             disabled={isLoadingSessions}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-colors disabled:opacity-50"
-            title="Segarkan data sesi dari server"
+            title={t('op_refresh_title')}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSessions ? 'animate-spin' : ''}`} />
-            <span>Segarkan</span>
+            <span>{t('refresh')}</span>
           </button>
         </div>
       </div>
@@ -549,14 +554,14 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
           <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 shadow-sm space-y-5">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Mulai Sesi Audit Lokasi Baru (Server)</span>
+              <span>{t('op_start_heading')}</span>
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Dropdown Site: HANYA berisi site dari currentUser.siteAccess */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Pilih Site (Sesuai Hak Akses):
+                  {t('op_pick_site')}
                 </label>
                 <select
                   value={selectedSiteId}
@@ -577,7 +582,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
               {/* Dropdown Lokasi yang Diaudit */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Pilih Lokasi yang Diaudit:
+                  {t('op_pick_loc')}
                 </label>
                 <select
                   value={selectedLocationId}
@@ -591,7 +596,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                       </option>
                     ))
                   ) : (
-                    <option value="">Semua Lokasi di {selectedSiteId}</option>
+                    <option value="">{t('op_all_locs_in', { site: selectedSiteId })}</option>
                   )}
                 </select>
               </div>
@@ -602,10 +607,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span>Pengaturan Akses Sesi</span>
+                  <span>{t('op_access_settings')}</span>
                 </span>
                 <span className="text-[11px] text-slate-500 font-mono">
-                  {isAdminMasterOrAllSites ? 'Otoritas Admin' : 'Akun Factory'}
+                  {isAdminMasterOrAllSites ? t('op_authority_admin') : t('op_account_factory')}
                 </span>
               </div>
 
@@ -613,7 +618,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 <div className="space-y-3">
                   {/* Badge Admin Master & All Sites (Selalu ikut) */}
                   <div className="flex items-center flex-wrap gap-2 text-xs">
-                    <span className="text-slate-600 dark:text-slate-400 font-medium">Otoritas Otomatis:</span>
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('op_auto_authority')}</span>
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-bold text-[11px]">
                       <ShieldCheck className="w-3 h-3 text-indigo-500" />
                       Admin Master
@@ -627,7 +632,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                   {/* Checkbox Factory Authority (PW1, PW2, PW3) */}
                   <div>
                     <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Authority Factory yang diizinkan ikut sesi:
+                      {t('op_factory_allowed')}
                     </span>
                     <div className="flex flex-wrap gap-3">
                       {FACTORY_SITES.map((siteCode) => {
@@ -660,7 +665,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                             <span>{siteCode}</span>
                             {isTargetSite && (
                               <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-normal">
-                                (Site Diaudit)
+                                {t('op_audited_site')}
                               </span>
                             )}
                           </label>
@@ -674,10 +679,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                     <div className="space-y-0.5">
                       <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Kunci pemindahan mesin di site ini</span>
+                        <span>{t('op_lock_moves')}</span>
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Kunci mutasi mesin di site {selectedSiteId} selama opname berlangsung (kecuali peserta sesi).
+                        {t('op_lock_moves_desc', { site: selectedSiteId })}
                       </div>
                     </div>
 
@@ -697,10 +702,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
                   <div className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <span>Akses sesi: site Anda saja ({selectedSiteId})</span>
+                    <span>{t('op_self_access', { site: selectedSiteId })}</span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    Pengaturan akses multi-site dan penguncian mutasi dikelola oleh Admin Master / All Sites.
+                    {t('op_multisite_note')}
                   </p>
                 </div>
               )}
@@ -709,10 +714,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             {/* Total Mesin Terdaftar Banner */}
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs flex items-center justify-between">
               <span className="text-slate-600 dark:text-slate-400">
-                Jumlah mesin terdaftar di {selectedLocationId || selectedSiteId}:
+                {t('op_registered_count', { loc: selectedLocationId || selectedSiteId })}
               </span>
               <span className="font-mono font-black text-emerald-700 dark:text-emerald-400 text-sm">
-                {expectedMachines.length} Mesin
+                {t('op_machines_count', { n: expectedMachines.length })}
               </span>
             </div>
 
@@ -721,10 +726,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
               <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 space-y-2.5">
                 <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 text-xs font-bold">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Sesi aktif sudah ada untuk Site {selectedSiteId}!</span>
+                  <span>{t('op_active_exists', { site: selectedSiteId })}</span>
                 </div>
                 <div className="text-[11px] text-amber-800 dark:text-amber-300">
-                  ID Sesi: <span className="font-mono font-bold">{activeSessionForSelectedSite.sessionId}</span> • Dimulai oleh: <span className="font-semibold">{activeSessionForSelectedSite.startedBy}</span>
+                  {t('op_session_id')} <span className="font-mono font-bold">{activeSessionForSelectedSite.sessionId}</span> • {t('op_started_by')} <span className="font-semibold">{activeSessionForSelectedSite.startedBy}</span>
                 </div>
                 <div className="flex gap-2 pt-1">
                   <button
@@ -733,14 +738,14 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                     className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5"
                   >
                     <Play className="w-3.5 h-3.5" />
-                    <span>Lanjutkan Sesi Ini</span>
+                    <span>{t('op_resume_this')}</span>
                   </button>
                   <button
                     type="button"
                     disabled
                     className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded-xl text-xs font-bold cursor-not-allowed opacity-60"
                   >
-                    Sesi aktif: {activeSessionForSelectedSite.sessionId}
+                    {t('op_active_session_btn', { id: activeSessionForSelectedSite.sessionId })}
                   </button>
                 </div>
               </div>
@@ -754,12 +759,12 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 {isStartingSession ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Membuat Sesi di Server...</span>
+                    <span>{t('op_creating')}</span>
                   </>
                 ) : (
                   <>
                     <ClipboardCheck className="w-4 h-4" />
-                    <span>Mulai Sesi Opname di Server</span>
+                    <span>{t('op_start_btn')}</span>
                   </>
                 )}
               </button>
@@ -771,10 +776,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-100 dark:border-slate-700">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Sesi Berjalan & Riwayat (Server)
+                  {t('op_running_history')}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-mono font-bold border border-emerald-200 dark:border-emerald-800">
-                  {activeServerSessions.length} Aktif
+                  {t('op_active_badge', { n: activeServerSessions.length })}
                 </span>
               </div>
             </div>
@@ -806,7 +811,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                   onClick={fetchSessions}
                   className="px-3 py-1.5 rounded-lg bg-rose-600 text-white font-bold text-xs hover:bg-rose-500 transition-colors shrink-0"
                 >
-                  Coba lagi
+                  {t('op_retry')}
                 </button>
               </div>
             )}
@@ -815,9 +820,9 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             {!isLoadingSessions && !sessionsFetchError && serverSessions.length === 0 && (
               <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs space-y-2">
                 <ClipboardCheck className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
-                <p className="font-semibold">Belum ada sesi Weekly Machine List di server.</p>
+                <p className="font-semibold">{t('op_no_sessions')}</p>
                 <p className="text-[11px] text-slate-400">
-                  Gunakan formulir di atas untuk memulai sesi audit baru.
+                  {t('op_no_sessions_hint')}
                 </p>
               </div>
             )}
@@ -826,7 +831,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             {!isLoadingSessions && !sessionsFetchError && activeServerSessions.length > 0 && (
               <div className="space-y-3">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  Sesi Aktif:
+                  {t('op_active_sessions')}
                 </span>
                 <div className="grid grid-cols-1 gap-3">
                   {activeServerSessions.map((s) => (
@@ -846,24 +851,24 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                             {s.lockMoves && (
                               <span
                                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[10px] font-bold border border-amber-300 dark:border-amber-800"
-                                title="Pemindahan mesin di site ini dikunci"
+                                title={t('op_moves_locked_title')}
                               >
                                 <Lock className="w-3 h-3 text-amber-600" />
-                                Mutasi Dikunci
+                                {t('op_moves_locked')}
                               </span>
                             )}
                           </div>
 
                           <div className="text-xs text-slate-600 dark:text-slate-400">
-                            Site: <span className="font-bold text-slate-800 dark:text-slate-200">{s.siteId}</span>
+                            {t('op_site_colon')} <span className="font-bold text-slate-800 dark:text-slate-200">{s.siteId}</span>
                             {s.locationId && (
-                              <span> • Lokasi: <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{s.locationId}</span></span>
+                              <span> • {t('op_location_colon')} <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{s.locationId}</span></span>
                             )}
-                            <span> • Oleh: <span className="font-semibold">{s.startedBy}</span></span>
+                            <span> • {t('hist_by')} <span className="font-semibold">{s.startedBy}</span></span>
                             {s.startedAt && (
                               <span className="text-[11px] text-slate-400 font-mono">
                                 {' '}
-                                ({new Date(s.startedAt).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })})
+                                ({new Date(s.startedAt).toLocaleString(localeOf(language), { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })})
                               </span>
                             )}
                           </div>
@@ -876,10 +881,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                               type="button"
                               onClick={() => handleOpenAccessModal(s)}
                               className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1 transition-colors"
-                              title="Atur akses authority factory & penguncian mutasi"
+                              title={t('op_edit_access_title')}
                             >
                               <Sliders className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">Atur akses</span>
+                              <span className="hidden sm:inline">{t('op_edit_access')}</span>
                             </button>
                           )}
 
@@ -889,14 +894,14 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                             className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
                           >
                             <Play className="w-3.5 h-3.5" />
-                            <span>Lanjutkan</span>
+                            <span>{t('op_resume')}</span>
                           </button>
                         </div>
                       </div>
 
                       {/* Chip Site yang Diizinkan */}
                       <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/70 dark:border-slate-800 text-[11px]">
-                        <span className="text-slate-500 dark:text-slate-400">Akses Sesi:</span>
+                        <span className="text-slate-500 dark:text-slate-400">{t('op_session_access')}</span>
                         <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-[10px]">
                           Admin Master
                         </span>
@@ -929,7 +934,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 >
                   <span className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Riwayat Sesi Selesai ({historyServerSessions.length})</span>
+                    <span>{t('op_history_title', { n: historyServerSessions.length })}</span>
                   </span>
                   {isHistoryExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -957,13 +962,13 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                             </span>
                           </div>
                           <div className="text-[11px] text-slate-500 truncate">
-                            Site: {s.siteId} • Oleh: {s.startedBy}
+                            {t('op_site_colon')} {s.siteId} • {t('hist_by')} {s.startedBy}
                           </div>
                         </div>
 
                         {s.endedAt && (
                           <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                            {new Date(s.endedAt).toLocaleDateString('id-ID')}
+                            {new Date(s.endedAt).toLocaleDateString(localeOf(language))}
                           </span>
                         )}
                       </div>
@@ -984,7 +989,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                    Sesi Opname Aktif di Server
+                    {t('op_live_title')}
                   </span>
                   <span className="font-mono text-xs font-bold text-slate-500 dark:text-slate-400">
                     [{activeSession.sessionId}]
@@ -992,18 +997,18 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                   {activeSession.lockMoves && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[10px] font-bold border border-amber-300 dark:border-amber-800">
                       <Lock className="w-3 h-3 text-amber-600" />
-                      Mutasi Dikunci
+                      {t('op_moves_locked')}
                     </span>
                   )}
                 </div>
 
                 <h2 className="text-lg font-black text-slate-900 dark:text-white font-mono">
-                  {activeSession.locationId || 'Semua Lokasi'} ({activeSession.siteId})
+                  {activeSession.locationId || t('op_all_locations')} ({activeSession.siteId})
                 </h2>
 
                 {/* Chips of Allowed Sites */}
                 <div className="flex items-center gap-1.5 flex-wrap text-xs pt-0.5">
-                  <span className="text-slate-500 text-[11px]">Akses Terbuka:</span>
+                  <span className="text-slate-500 text-[11px]">{t('op_open_access')}</span>
                   <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-[10px]">
                     Admin Master
                   </span>
@@ -1025,7 +1030,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                       onClick={() => handleOpenAccessModal(activeSession)}
                       className="ml-1 text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline font-bold"
                     >
-                      (Ubah Akses)
+                      {t('op_change_access')}
                     </button>
                   )}
                 </div>
@@ -1044,7 +1049,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                   className="px-3 py-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 flex items-center gap-1"
                 >
                   <XCircle className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Batal</span>
+                  <span>{t('cancel')}</span>
                 </button>
 
                 <button
@@ -1056,12 +1061,12 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                   {isFinishingSession ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Menyimpan...</span>
+                      <span>{t('op_saving')}</span>
                     </>
                   ) : (
                     <>
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Selesaikan & Simpan</span>
+                      <span>{t('op_finish_save')}</span>
                     </>
                   )}
                 </button>
@@ -1071,14 +1076,14 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             {/* Counters Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 text-center">
-                <div className="text-slate-500">Terdaftar (Expected)</div>
+                <div className="text-slate-500">{t('op_registered_expected')}</div>
                 <div className="text-xl font-bold text-slate-900 dark:text-white font-mono mt-1">
                   {activeSession.expected || expectedMachines.length}
                 </div>
               </div>
 
               <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-center">
-                <div className="text-emerald-800 dark:text-emerald-300 font-bold">MATCH (Sesuai)</div>
+                <div className="text-emerald-800 dark:text-emerald-300 font-bold">{t('op_match_ok')}</div>
                 <div className="text-xl font-bold text-emerald-700 dark:text-emerald-400 font-mono mt-1">
                   {activeSession.match || 0}
                 </div>
@@ -1113,7 +1118,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                   type="text"
                   value={inputScanCode}
                   onChange={(e) => setInputScanCode(e.target.value)}
-                  placeholder="Scan QR / Barcode atau ketik Barcode / Kode Aset di sini..."
+                  placeholder={t('op_scan_ph')}
                   className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border-2 border-emerald-500 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white font-mono placeholder:text-slate-400 shadow-xs transition-colors"
                   autoComplete="off"
                 />
@@ -1123,7 +1128,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                       type="button"
                       onClick={onOpenScanner}
                       className="p-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                      title="Buka Kamera Scanner"
+                      title={t('op_open_camera')}
                     >
                       <QrCode className="w-4 h-4" />
                     </button>
@@ -1142,13 +1147,13 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
           {/* Scanned Items Stream */}
           <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 shadow-sm space-y-4">
             <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center justify-between">
-              <span>Hasil Scan Terkini ({scannedItems.length})</span>
-              <span className="text-xs text-slate-500">Urut waktu scan terbaru</span>
+              <span>{t('op_recent_scans', { n: scannedItems.length })}</span>
+              <span className="text-xs text-slate-500">{t('op_newest_first')}</span>
             </h3>
 
             {scannedItems.length === 0 ? (
               <div className="p-6 text-center text-slate-400 text-xs">
-                Arahkan barcode scanner untuk mulai mendeteksi mesin di lokasi ini.
+                {t('op_scan_empty')}
               </div>
             ) : (
               <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
@@ -1177,13 +1182,13 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
 
                       {item.result === 'MISPLACED_SAME_SITE' && (
                         <div className="text-amber-800 dark:text-amber-300 text-[11px]">
-                          Tercatat di <span className="font-bold">{item.registeredLocation}</span> (Site {item.registeredSite})
+                          {t('op_recorded_at')} <span className="font-bold">{item.registeredLocation}</span> ({t('op_site_word')} {item.registeredSite})
                         </div>
                       )}
 
                       {item.result === 'MISPLACED_OTHER_SITE' && (
                         <div className="text-rose-800 dark:text-rose-300 text-[11px]">
-                          Milik pabrik lain! Tercatat di Site <span className="font-bold">{item.registeredSite}</span> ({item.registeredLocation})
+                          {t('op_other_factory')} <span className="font-bold">{item.registeredSite}</span> ({item.registeredLocation})
                         </div>
                       )}
                     </div>
@@ -1198,7 +1203,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                         <ArrowRight className="w-3.5 h-3.5" />
                         <span>
                           {relocatingCode === item.assetCode
-                            ? 'Memindahkan...'
+                            ? t('op_moving')
                             : getTranslation('move_to_this_location', language)}
                         </span>
                       </button>
@@ -1214,7 +1219,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-rose-200 dark:border-rose-800/80 shadow-sm space-y-3">
               <h3 className="font-bold text-sm text-rose-700 dark:text-rose-400 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4" />
-                <span>Belum Terscan di Lokasi Ini (Missing: {missingMachines.length})</span>
+                <span>{t('op_missing_heading', { n: missingMachines.length })}</span>
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -1248,7 +1253,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
               <div className="flex items-center gap-2">
                 <Sliders className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  Atur Akses Sesi
+                  {t('op_access_modal_title')}
                 </h3>
               </div>
               <button
@@ -1261,19 +1266,19 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
             </div>
 
             <div className="text-xs space-y-1">
-              <div className="text-slate-500">ID Sesi:</div>
+              <div className="text-slate-500">{t('op_session_id')}</div>
               <div className="font-mono font-bold text-slate-900 dark:text-white text-sm">
                 {editingSession.sessionId}
               </div>
               <div className="text-slate-500">
-                Site Utama: <span className="font-bold text-slate-800 dark:text-slate-200">{editingSession.siteId}</span>
+                {t('op_main_site')} <span className="font-bold text-slate-800 dark:text-slate-200">{editingSession.siteId}</span>
               </div>
             </div>
 
             {/* Checkbox Sites */}
             <div className="space-y-2">
               <span className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                Authority Factory yang Diizinkan:
+                {t('op_factory_allowed2')}
               </span>
               <div className="flex flex-wrap gap-2.5">
                 {FACTORY_SITES.map((siteCode) => {
@@ -1315,10 +1320,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
               <div className="space-y-0.5">
                 <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Kunci pemindahan mesin di site ini</span>
+                  <span>{t('op_lock_moves')}</span>
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Cegah mutasi mesin selama opname berlangsung.
+                  {t('op_prevent_moves')}
                 </div>
               </div>
 
@@ -1340,7 +1345,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 onClick={() => setEditingSession(null)}
                 className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
               >
-                Batal
+                {t('cancel')}
               </button>
               <button
                 type="button"
@@ -1351,10 +1356,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                 {isUpdatingAccess ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Menyimpan...</span>
+                    <span>{t('op_saving')}</span>
                   </>
                 ) : (
-                  <span>Simpan Akses</span>
+                  <span>{t('op_save_access')}</span>
                 )}
               </button>
             </div>

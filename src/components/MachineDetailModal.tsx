@@ -18,7 +18,7 @@ import {
 import { Machine } from '../types';
 import { getMachineLabel } from '../utils/machineName';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
 import { Pagination } from './Pagination';
@@ -37,6 +37,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
   onMoveClick,
 }) => {
   const { language, canAccessSite, canPerformAction } = useAuth();
+  const t = makeT(language);
   const [activeTab, setActiveTab] = useState<'info' | 'movements' | 'status_log' | 'qr_card'>('info');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
@@ -55,10 +56,10 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
       if (res.success && res.movements) {
         setServerMovements(res.movements);
       } else {
-        setMovementsError(res.message || 'Gagal memuat riwayat mesin dari server.');
+        setMovementsError(res.message ? localizeMessage(res.message, language) : t('md_load_err'));
       }
     } catch (err: any) {
-      setMovementsError(err.message || 'Terjadi kesalahan saat memuat riwayat.');
+      setMovementsError(err.message ? localizeMessage(err.message, language) : t('md_load_err2'));
     } finally {
       setIsLoadingMovements(false);
     }
@@ -169,7 +170,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             }`}
           >
             <Tag className="w-3.5 h-3.5" />
-            <span>Spesifikasi & Info</span>
+            <span>{t('md_tab_info')}</span>
           </button>
 
           <button
@@ -182,7 +183,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
           >
             <History className="w-3.5 h-3.5" />
             <span>
-              Riwayat Pemindahan {isLoadingMovements ? '(...)' : `(${serverMovements.length})`}
+              {t('md_tab_moves')} {isLoadingMovements ? '(...)' : `(${serverMovements.length})`}
             </span>
           </button>
 
@@ -195,7 +196,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
-            <span>Log Status ({statusLogs.length})</span>
+            <span>{t('md_tab_status')} ({statusLogs.length})</span>
           </button>
 
           <button
@@ -207,7 +208,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             }`}
           >
             <QrCode className="w-3.5 h-3.5" />
-            <span>Label QR Code</span>
+            <span>{t('md_tab_qr')}</span>
           </button>
         </div>
 
@@ -221,35 +222,35 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                   <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                     <Building className="w-4 h-4 text-emerald-700" />
-                    <span>Lokasi & Site Mesin</span>
+                    <span>{t('md_loc_card')}</span>
                   </div>
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
-                      <span className="text-slate-500">Site Saat Ini:</span>
+                      <span className="text-slate-500">{t('md_cur_site')}</span>
                       <span className="font-bold font-mono bg-emerald-100 px-2 py-0.5 rounded text-emerald-900 border border-emerald-200">
                         {machine.siteId}
                       </span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
-                      <span className="text-slate-500">Lokasi ID:</span>
+                      <span className="text-slate-500">{t('md_loc_id')}</span>
                       <span className="font-bold text-slate-900 font-mono">
                         {machine.locationId}
                       </span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
-                      <span className="text-slate-500">Home Factory (Asal):</span>
+                      <span className="text-slate-500">{t('md_home')}</span>
                       <span className="font-medium text-slate-800">
                         {machine.homeFactory}
                       </span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
-                      <span className="text-slate-500">Terakhir Dipindah:</span>
+                      <span className="text-slate-500">{t('md_last_moved')}</span>
                       <span className="text-slate-800">
-                        {machine.lastMovedAt ? new Date(machine.lastMovedAt).toLocaleString('id-ID') : '-'}
+                        {machine.lastMovedAt ? new Date(machine.lastMovedAt).toLocaleString(localeOf(language)) : '-'}
                       </span>
                     </div>
                     <div className="flex justify-between py-1">
-                      <span className="text-slate-500">Oleh User:</span>
+                      <span className="text-slate-500">{t('md_by_user')}</span>
                       <span className="text-slate-800 font-mono">
                         {machine.lastMovedBy || '-'}
                       </span>
@@ -260,11 +261,11 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                   <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-emerald-700" />
-                    <span>Spesifikasi Teknis Mesin</span>
+                    <span>{t('md_spec_card')}</span>
                   </div>
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
-                      <span className="text-slate-500">Merk (Manufacturer):</span>
+                      <span className="text-slate-500">{t('md_brand')}</span>
                       <span className="font-bold text-slate-900">{machine.manufacturer}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
@@ -278,21 +279,21 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                       </span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
-                      <span className="text-slate-500">Nama Standar:</span>
+                      <span className="text-slate-500">{t('md_std_name')}</span>
                       <span className="text-slate-800 font-medium">{machine.standardMachineName}</span>
                     </div>
                     {machine.localName && (
                       <div className="flex justify-between py-1 border-b border-slate-200/80">
-                        <span className="text-slate-500">Nama Lokal:</span>
+                        <span className="text-slate-500">{t('md_local_name')}</span>
                         <span className="text-slate-900 font-bold">{machine.localName}</span>
                       </div>
                     )}
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
-                      <span className="text-slate-500">Nama Korea (Item):</span>
+                      <span className="text-slate-500">{t('md_korean')}</span>
                       <span className="text-slate-800 font-medium">{machine.item || '-'}</span>
                     </div>
                     <div className="flex justify-between py-1">
-                      <span className="text-slate-500">Tgl Perolehan:</span>
+                      <span className="text-slate-500">{t('md_acq')}</span>
                       <span className="text-slate-800">{machine.acqDate || '-'}</span>
                     </div>
                   </div>
@@ -304,15 +305,15 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                 <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 text-xs space-y-2">
                   <div className="font-bold flex items-center gap-2 text-purple-900">
                     <User className="w-4 h-4 text-purple-700" />
-                    <span>Informasi Peminjaman Mesin (Status: LOANED)</span>
+                    <span>{t('md_loan_title')}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <span className="text-purple-700">Dipinjamkan Kepada:</span>
+                      <span className="text-purple-700">{t('md_loaned_to')}</span>
                       <div className="font-bold text-purple-950">{machine.loanTo || '-'}</div>
                     </div>
                     <div>
-                      <span className="text-purple-700">Batas Waktu Pengembalian:</span>
+                      <span className="text-purple-700">{t('md_return_due')}</span>
                       <div className="font-bold text-purple-950">{machine.loanDueDate || '-'}</div>
                     </div>
                   </div>
@@ -322,10 +323,9 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
               {/* In Transit Details */}
               {machine.pendingTransferId && (
                 <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1">
-                  <div className="font-bold text-amber-950">Mesin Terkunci (Sedang In Transit)</div>
+                  <div className="font-bold text-amber-950">{t('md_locked')}</div>
                   <p className="text-amber-800">
-                    Transfer ID: <span className="font-mono font-bold">{machine.pendingTransferId}</span>.
-                    Mesin tidak dapat dipindahkan atau diubah statusnya sebelum diterima di site tujuan.
+                    Transfer ID: <span className="font-mono font-bold">{machine.pendingTransferId}</span>. {t('md_locked_desc')}
                   </p>
                 </div>
               )}
@@ -338,7 +338,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
               {isLoadingMovements ? (
                 <div className="text-center py-10 space-y-2">
                   <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
-                  <p className="text-xs text-slate-500 font-mono">Memuat riwayat dari server...</p>
+                  <p className="text-xs text-slate-500 font-mono">{t('md_loading')}</p>
                 </div>
               ) : movementsError ? (
                 <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between gap-3">
@@ -348,12 +348,12 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                     onClick={() => machine && fetchMachineMovements(machine.assetCode)}
                     className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
                   >
-                    Coba Lagi
+                    {t('retry')}
                   </button>
                 </div>
               ) : serverMovements.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-xs">
-                  Belum ada catatan mutasi untuk mesin ini.
+                  {t('md_no_moves')}
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -378,11 +378,11 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                                     : 'bg-slate-100 text-slate-700 border-slate-200'
                                 }`}
                               >
-                                {mov.status || 'MUTASI'}
+                                {mov.status || t('md_movement_fallback')}
                               </span>
                               {mov.isUndone && (
                                 <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 border border-rose-200">
-                                  Dibatalkan
+                                  {t('transfer_cancelled')}
                                 </span>
                               )}
                               <span className="font-mono text-slate-500 text-[11px]">
@@ -390,12 +390,12 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                               </span>
                             </div>
                             <div className="text-slate-900 font-medium">
-                              <span className="text-slate-500">Dari: </span>
+                              <span className="text-slate-500">{t('md_from')} </span>
                               <span className="font-mono text-amber-800 font-bold">
                                 {mov.fromSite ? `[${mov.fromSite}] ` : ''}
                                 {mov.fromLocation || '-'}
                               </span>
-                              <span className="text-slate-500"> → Menuju: </span>
+                              <span className="text-slate-500"> → {t('md_to')} </span>
                               <span className="font-mono text-emerald-800 font-bold">
                                 {mov.toSite ? `[${mov.toSite}] ` : ''}
                                 {mov.toLocation || '-'}
@@ -405,7 +405,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                             {mov.notes && <p className="text-[10px] text-slate-500">{mov.notes}</p>}
                           </div>
                           <div className="text-right text-[11px] text-slate-500 shrink-0">
-                            Oleh: <span className="font-bold text-slate-800">{mov.movedBy || 'Sistem'}</span>
+                            {t('md_by')} <span className="font-bold text-slate-800">{mov.movedBy || t('md_system')}</span>
                           </div>
                         </div>
                       ))}
@@ -418,7 +418,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                       totalItems={serverMovements.length}
                       pageSize={25}
                       onPageChange={setMovementsPage}
-                      itemLabel="mutasi"
+                      itemLabel={t('md_item_label')}
                     />
                   )}
                 </div>
@@ -431,7 +431,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             <div className="space-y-3">
               {statusLogs.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-xs">
-                  Belum ada catatan perubahan status untuk mesin ini.
+                  {t('md_no_status')}
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -447,11 +447,11 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                           <span className="font-bold text-emerald-700">{log.newStatus}</span>
                         </div>
                         <span className="text-[11px] text-slate-500 font-mono">
-                          {new Date(log.timestamp).toLocaleString('id-ID')}
+                          {new Date(log.timestamp).toLocaleString(localeOf(language))}
                         </span>
                       </div>
                       {log.note && <p className="text-slate-700 text-[11px]">{log.note}</p>}
-                      <div className="text-[10px] text-slate-500">Oleh user: {log.byUser}</div>
+                      <div className="text-[10px] text-slate-500">{t('md_by_user_lc')} {log.byUser}</div>
                     </div>
                   ))}
                 </div>
@@ -510,7 +510,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                   {/* Barcode 12-Digit (Source of 2D QR Code) */}
                   <div className="bg-slate-50 rounded-lg py-1 px-2 border border-slate-200">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                      KODE BARCODE (DI-ENCODE KE QR):
+                      {t('md_qr_code_label')}
                     </span>
                     <span className="text-xs font-mono font-black text-slate-900 tracking-wider">
                       {machine.barcode}
@@ -530,7 +530,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-transform hover:scale-105 active:scale-95"
                 >
                   <Printer className="w-4 h-4" />
-                  <span>Cetak Label QR Mesin</span>
+                  <span>{t('md_print')}</span>
                 </button>
 
                 {qrDataUrl && (
@@ -540,7 +540,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                     className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors"
                   >
                     <QrCode className="w-4 h-4 text-emerald-600" />
-                    <span>Unduh PNG</span>
+                    <span>{t('md_download')}</span>
                   </a>
                 )}
               </div>
@@ -554,7 +554,7 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors"
           >
-            Tutup
+            {t('close')}
           </button>
 
           {hasSiteAccess && !machine.pendingTransferId && machine.status !== 'SOLD' && onMoveClick && (

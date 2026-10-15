@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { RackConfig, RACK_LEVELS, RackSlotItem } from '../../services/rackMapService';
+import { useAuth } from '../../services/authContext';
+import { makeT } from '../../services/translations';
 
 export interface SelectedColumnCoord {
   level: 'A' | 'B' | 'C' | string;
@@ -19,6 +21,8 @@ export const RackDetail: React.FC<RackDetailProps> = ({
   onSelectColumn,
   slots,
 }) => {
+  const { language } = useAuth();
+  const t = makeT(language);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(800);
 
@@ -119,12 +123,12 @@ export const RackDetail: React.FC<RackDetailProps> = ({
           // Tooltip saat hover: "R4-B12 · 2/3 slot" beserta kode aset
           const assignedAssets = slotItems
             .map((item, i) =>
-              item ? `Slot ${i + 1}: ${item.assetCode} (${item.name || 'Mesin'})` : null
+              item ? t('rm_cell_slot_line', { i: i + 1, code: item.assetCode, name: item.name || t('rm_machine') }) : null
             )
             .filter(Boolean);
 
           const tooltipLines = [
-            `${rack.id}-${level}${col} · ${filledSlotCount}/3 slot`,
+            t('rm_cell_tip', { pos: `${rack.id}-${level}${col}`, n: filledSlotCount }),
             ...assignedAssets,
           ];
           const tooltipText = tooltipLines.join('\n');
@@ -157,7 +161,7 @@ export const RackDetail: React.FC<RackDetailProps> = ({
                   : 'bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200/80 dark:hover:bg-slate-700/80'
               }`}
               title={tooltipText}
-              aria-label={`Rak ${rack.id} Tingkat ${level} Kolom ${col}`}
+              aria-label={t('rm_cell_aria', { rack: rack.id, level, col })}
             >
               {/* Garis 3 slot jika kotak >= 16px (Point 3) */}
               {!isTinyCell && (
@@ -237,10 +241,10 @@ export const RackDetail: React.FC<RackDetailProps> = ({
       <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-baseline gap-2">
           <span className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-            Rak {rack.id}
+            {t('rm_rack_title', { id: rack.id })}
           </span>
           <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">
-            {rack.n} kolom
+            {t('rm_cols', { n: rack.n })}
           </span>
         </div>
         <div className="text-xs font-mono font-semibold text-slate-500 dark:text-slate-400">
@@ -282,15 +286,15 @@ export const RackDetail: React.FC<RackDetailProps> = ({
       <div className="flex items-center gap-4 flex-wrap text-[11px] pt-3 border-t border-slate-100 dark:border-slate-800 text-slate-400 dark:text-slate-500">
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-xs bg-slate-300 dark:bg-slate-600" />
-          Slot kosong
+          {t('rm_legend_empty')}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-xs bg-indigo-600 dark:bg-indigo-400" />
-          Slot terisi
+          {t('rm_legend_filled')}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-xs border-2 border-indigo-500 bg-slate-100 dark:bg-slate-800" />
-          Kolom terpilih
+          {t('rm_legend_sel')}
         </span>
       </div>
     </div>

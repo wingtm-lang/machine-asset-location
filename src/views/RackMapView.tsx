@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ScannerModal } from '../components/ScannerModal'; // sesuaikan path bila file ada di folder lain
 import {
   WH2_RACKS,
   RackConfig,
@@ -9,8 +8,9 @@ import {
 import { getGasBaseUrl } from '../services/gasAuthService';
 import { RoomMap } from '../components/rackmap/RoomMap';
 import { RackDetail, SelectedColumnCoord } from '../components/rackmap/RackDetail';
-import { SlotPanel, SlotScanInput } from '../components/rackmap/SlotPanel';
+import { SlotPanel } from '../components/rackmap/SlotPanel';
 import { useAuth } from '../services/authContext';
+import { makeT, localeOf, localizeMessage } from '../services/translations';
 import {
   RotateCcw,
   Boxes,
@@ -24,23 +24,6 @@ interface RackMapViewProps {
   onOpenScanner?: () => void;
 }
 
-/** true bila lebar layar >= 1024px (breakpoint "lg"), mengikuti perubahan ukuran layar. */
-function useIsDesktop(): boolean {
-  const query = '(min-width: 1024px)';
-  const [matches, setMatches] = useState<boolean>(
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : true
-  );
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const mql = window.matchMedia(query);
-    const onChange = () => setMatches(mql.matches);
-    onChange();
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  }, []);
-  return matches;
-}
-
 interface ToastMessage {
   id: number;
   type: 'success' | 'error' | 'warning';
@@ -48,7 +31,8 @@ interface ToastMessage {
 }
 
 export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, language } = useAuth();
+  const t = makeT(language);
 
   // State
   const [selectedRack, setSelectedRack] = useState<RackConfig>(WH2_RACKS[3]); // Default: R4
@@ -59,11 +43,6 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
   const [slots, setSlots] = useState<RackSlotItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [toast, setToast] = useState<ToastMessage | null>(null);
-
-  // Pemindai kamera untuk slot rak
-  const isDesktop = useIsDesktop();
-  const [scanSlot, setScanSlot] = useState<number | null>(null); // slot tujuan; null = pemindai tertutup
-  const [scanInput, setScanInput] = useState<SlotScanInput | null>(null);
 
   const gasUrl = getGasBaseUrl();
 
@@ -90,43 +69,18 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
       if (res.success && Array.isArray(res.slots)) {
         setSlots(res.slots);
       } else {
-        showToast('error', res.message || 'Gagal memuat peta slot rak');
+        showToast('error', res.message ? localizeMessage(res.message, language) : t('rm_load_fail'));
       }
     } catch (err: any) {
-      showToast('error', err.message || 'Gagal terhubung ke layanan GAS');
+      showToast('error', err.message ? localizeMessage(err.message, language) : t('rm_gas_fail'));
     } finally {
       setIsLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, language]);
 
   useEffect(() => {
     fetchMapData();
   }, [fetchMapData]);
-
-  const positionCode = selectedRack && selectedCoord ? `${selectedRack.id}-${selectedCoord.level}${selectedCoord.column}` : '';
-
-  // Tombol Scan di header: bila ada kolom terbuka, arahkan ke slot kosong pertama kolom itu.
-  const handleHeaderScan = () => {
-    if (selectedRack && selectedCoord) {
-      const firstEmpty = [1, 2, 3].find(
-        (n) =>
-          !slots.some(
-            (s) =>
-              s.rak === selectedRack.id &&
-              s.tingkat === selectedCoord.level &&
-              s.kolom === selectedCoord.column &&
-              s.slot === n
-          )
-      );
-      if (!firstEmpty) {
-        showToast('warning', `Semua slot di ${positionCode} sudah terisi. Pilih kolom lain atau keluarkan mesin dulu.`);
-        return;
-      }
-      setScanSlot(firstEmpty);
-      return;
-    }
-    onOpenScanner?.();
-  };
 
   // Total capacity across all 6 racks: 144 columns x 3 levels x 3 slots = 1296 slots
   const totalCapacity = WH2_RACKS.reduce((acc, r) => acc + r.n * 3 * 3, 0);
@@ -146,8 +100,8 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
             className="group relative flex items-center cursor-help"
             title={
               gasUrl
-                ? `Status: Terhubung ke GAS Web App\n${gasUrl}\nFormat Lokasi: WH2-R[1-6]-[A-C][kolom]-S[1-3]`
-                : `Status: Menggunakan Sinkronisasi Lokal (Offline)\nFormat Lokasi: WH2-R[1-6]-[A-C][kolom]-S[1-3]`
+                ? t('rm_tip_gas', { url: gasUrl })
+                : t('rm_tip_local')
             }
           >
             <span
@@ -163,7 +117,7 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
           {/* Chip Progres Keterisian */}
           <div className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs">
             <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 text-[11px] sm:text-xs">
-              {totalFilled.toLocaleString('id-ID')} / {totalCapacity.toLocaleString('id-ID')}
+              {totalFilled.toLocaleString(localeOf(language))} / {totalCapacity.toLocaleString(localeOf(language))}
             </span>
             <div className="w-12 sm:w-16 h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
               <div
@@ -179,21 +133,23 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
             disabled={isLoading}
             onClick={fetchMapData}
             className="p-2 rounded-xl border border-slate-200/80 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 transition-colors cursor-pointer"
-            title="Segarkan data rack map"
-            aria-label="Segarkan data"
+            title={t('rm_refresh_title')}
+            aria-label={t('rm_refresh_aria')}
           >
             <RotateCcw className={`w-4 h-4 ${isLoading ? 'animate-spin text-indigo-600' : ''}`} />
           </button>
 
           {/* Tombol Utama Scan (Ikon + Teks) */}
-          <button
-            type="button"
-            onClick={handleHeaderScan}
-            className="px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-          >
-            <QrCode className="w-3.5 h-3.5" />
-            <span>Scan</span>
-          </button>
+          {onOpenScanner && (
+            <button
+              type="button"
+              onClick={onOpenScanner}
+              className="px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Scan</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -234,8 +190,6 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
               onClose={() => setSelectedCoord(null)}
               onNotifyToast={showToast}
               onOpenScanner={onOpenScanner}
-              onRequestScan={setScanSlot}
-              scanInput={isDesktop ? scanInput : null}
             />
           ) : (
             <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 text-center flex flex-col items-center justify-center min-h-[280px] text-slate-400 dark:text-slate-500 space-y-2.5 shadow-xs">
@@ -243,7 +197,7 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
                 <Boxes className="w-5 h-5" />
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-medium max-w-[210px] leading-relaxed">
-                Pilih salah satu kotak kolom pada rak untuk melihat & mengelola 3 slot aset.
+                {t('rm_pick_hint')}
               </p>
             </div>
           )}
@@ -266,23 +220,10 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
               onClose={() => setSelectedCoord(null)}
               onNotifyToast={showToast}
               onOpenScanner={onOpenScanner}
-              onRequestScan={setScanSlot}
-              scanInput={isDesktop ? null : scanInput}
             />
           </div>
         </div>
       )}
-
-      {/* Pemindai kamera untuk slot terbuka: hasil barcode ditempel ke kolom Cari slot tujuan */}
-      <ScannerModal
-        isOpen={scanSlot !== null}
-        onClose={() => setScanSlot(null)}
-        initialMode="camera"
-        captureLabel={scanSlot !== null ? `Scan ke slot ${positionCode} / Slot ${scanSlot}` : undefined}
-        onCapture={(code) => {
-          if (scanSlot !== null) setScanInput({ slot: scanSlot, code, nonce: Date.now() });
-        }}
-      />
 
       {/* 8) TOAST NOTIFIKASI KECIL DI POJOK (Bukan Blok Pesan di Halaman) */}
       {toast && (
@@ -310,7 +251,7 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
               type="button"
               onClick={() => setToast(null)}
               className="opacity-60 hover:opacity-100 p-0.5"
-              aria-label="Tutup notifikasi"
+              aria-label={t('rm_toast_close')}
             >
               <X className="w-3.5 h-3.5" />
             </button>

@@ -12,6 +12,7 @@ import {
   Users,
   ShieldAlert,
   QrCode,
+  Zap,
   Languages,
   KeyRound,
   LogOut,
@@ -21,12 +22,14 @@ import {
   Compass,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
+import { makeT } from '../services/translations';
 import { PtWinnersLogo } from './PtWinnersLogo';
 
 interface SidebarProps {
   activeTab: string;
   onSelectTab: (tab: string) => void;
   onOpenScanner: () => void;
+  onOpenBenchmark: () => void;
   onOpenChangePassword: () => void;
   onOpenLogout?: () => void;
   isOpenMobile?: boolean;
@@ -37,6 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   onSelectTab,
   onOpenScanner,
+  onOpenBenchmark,
   onOpenChangePassword,
   onOpenLogout,
   isOpenMobile = false,
@@ -52,6 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setLanguage,
   } = useAuth();
 
+  const t = makeT(language);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
   const handleLogout = () => {
@@ -63,51 +68,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const navItems = [
-    { id: 'home', label: 'Beranda', icon: LayoutGrid, show: true, badge: 'Home' },
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true, badge: 'Live' },
-    { id: 'machines', label: 'Data Mesin', icon: Boxes, show: true },
-    { id: 'rackmap', label: 'WH2 Rack Map', icon: Grid, show: canUseRackMap, badge: 'WH2' },
+    { id: 'home', label: t('home'), icon: LayoutGrid, show: true, badge: 'Home' },
+    { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard, show: true, badge: 'Live' },
+    { id: 'machines', label: t('shell_hdr_machines'), icon: Boxes, show: true, badge: '5.7k' },
+    { id: 'rackmap', label: t('shell_hdr_rackmap'), icon: Grid, show: canUseRackMap, badge: 'WH2' },
     {
       id: 'move',
-      label: 'Pindahkan Lokasi',
+      label: t('shell_hdr_move'),
       icon: Layers,
       show: canPerformAction('MOVE') || canPerformAction('CHANGE_STATUS'),
     },
     {
       id: 'transfers',
-      label: 'Transfer Site',
+      label: t('shell_nav_transfers'),
       icon: ArrowRightLeft,
       show: canPerformAction('TRANSFER'),
     },
     {
       id: 'opname',
-      label: 'Weekly Machine List',
+      label: t('opname'),
       icon: ClipboardCheck,
       show: canPerformAction('OPNAME'),
     },
     {
       id: 'history',
-      label: 'Riwayat Mesin',
+      label: t('hist_title'),
       icon: History,
       show: true,
       badge: 'Live',
     },
     {
       id: 'reports',
-      label: 'Laporan Harian',
+      label: t('reports'),
       icon: FileText,
       show: canPerformAction('REPORTS'),
     },
     {
       id: 'users',
-      label: 'Kelola Pengguna',
+      label: t('shell_hdr_users'),
       icon: Users,
       show: canAddUser,
       badge: 'Admin',
     },
     {
       id: 'admin',
-      label: 'Admin GAS',
+      label: t('shell_nav_admin'),
       icon: ShieldAlert,
       show: canPerformAction('ADMIN') || canAddUser,
     },
@@ -169,13 +174,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-[#ffd23f] via-[#ffc720] to-[#f59e0b] hover:from-[#ffe066] hover:to-[#fbbf24] active:scale-98 text-[#0c2e57] text-xs font-black shadow-lg shadow-[#051324]/50 transition-all cursor-pointer"
         >
           <QrCode className="w-4 h-4 stroke-[2.5]" />
-          <span>Scan QR / Barcode</span>
+          <span>{t('scan')}</span>
         </button>
 
         {/* Navigation Menu Links */}
         <div className="space-y-1 pt-1">
           <div className="px-2 text-[10px] font-bold uppercase tracking-wider text-[#7fb2e8]/80 mb-2 font-mono flex items-center justify-between">
-            <span>Navigation Menu</span>
+            <span>{t('shell_nav_menu')}</span>
             <Compass className="w-3 h-3 text-[#7fb2e8]/60" />
           </div>
           {navItems
@@ -221,13 +226,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bagian Bawah: Profile Card, Quick Tools & Logout */}
       <div className="space-y-3 pt-4 border-t border-[#1d477c]/60 mt-4">
-        {/* Quick Tools Row (Bahasa ID/EN) */}
-        <div className="text-xs">
+        {/* Quick Tools Row (5.7k Test & Bahasa ID/EN) */}
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <button
+            type="button"
+            onClick={onOpenBenchmark}
+            className="p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#ffd23f]/30 bg-[#ffd23f]/10 hover:bg-[#ffd23f]/20 text-[#ffd23f] transition-all cursor-pointer shadow-2xs"
+            title={t('shell_bench_tool_title')}
+          >
+            <Zap className="w-3.5 h-3.5 fill-[#ffd23f] text-[#ffd23f]" />
+            <span>5.7k Test</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setLanguage(language === 'id' ? 'en' : 'id')}
-            className="w-full p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
-            title="Ganti Bahasa (ID / EN)"
+            className="p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
+            title={t('shell_lang_title')}
           >
             <Languages className="w-3.5 h-3.5 text-[#7fb2e8]" />
             <span>{language.toUpperCase()}</span>
@@ -261,7 +276,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                title="Keluar dari sistem"
+                title={t('shell_logout_title')}
                 onClick={(e) => {
                   e.stopPropagation();
                   handleLogout();
@@ -284,7 +299,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="p-2 border-b border-[#1f487a] mb-1">
                 <div className="font-bold text-xs text-white">{currentUser?.displayName}</div>
                 <div className="text-[10px] text-[#7fb2e8] font-mono">
-                  Site: {currentUser?.siteAccess?.join(', ')}
+                  {t('shell_site_label', { site: currentUser?.siteAccess?.join(', ') ?? '' })}
                 </div>
               </div>
 
@@ -297,7 +312,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-[#cfe6ff] hover:text-white hover:bg-white/10 cursor-pointer text-left transition-colors"
               >
                 <KeyRound className="w-3.5 h-3.5 text-[#ffd23f]" />
-                <span>Ubah Password</span>
+                <span>{t('change_password')}</span>
               </button>
 
               <button
@@ -309,7 +324,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-rose-300 hover:text-rose-100 hover:bg-rose-950/50 cursor-pointer text-left transition-colors"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span>Keluar dari Sistem</span>
+                <span>{t('logout_system')}</span>
               </button>
             </div>
           )}

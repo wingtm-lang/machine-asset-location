@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { gasAuthService } from '../services/gasAuthService';
+import { makeT, localizeMessage } from '../services/translations';
 
 export const LoginPage: React.FC = () => {
-  const { login } = useAuth();
+  const { login, language } = useAuth();
+  const t = makeT(language);
 
   const [nik, setNik] = useState('');
   const [password, setPassword] = useState('');
@@ -46,13 +48,13 @@ export const LoginPage: React.FC = () => {
   const full = [-30, -22, 785, 500];
   const zoom = [100, 2, 596, 84];
   const rack = [0, 0, 250, 392];
-  const buttonLabels = ['Zoom ke Mechanic', 'Zoom ke Rak', 'Lihat semua'];
+  const buttonLabels = [t('lg_zoom_mechanic'), t('lg_zoom_rack'), t('lg_view_all')];
 
   // Handle Form Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nik.trim() || !password) {
-      setErrorMessage('NIK dan Password wajib diisi.');
+      setErrorMessage(t('lg_err_required'));
       return;
     }
 
@@ -62,10 +64,10 @@ export const LoginPage: React.FC = () => {
     try {
       const res = await login(nik.trim(), password);
       if (!res.success) {
-        setErrorMessage(res.message || 'Login gagal, periksa kembali NIK dan password.');
+        setErrorMessage(res.message ? localizeMessage(res.message, language) : t('lg_err_failed'));
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Gagal terhubung ke backend.');
+      setErrorMessage(err.message ? localizeMessage(err.message, language) : t('lg_err_backend'));
     } finally {
       setIsLoading(false);
     }
@@ -81,6 +83,11 @@ export const LoginPage: React.FC = () => {
     const drg = svg.querySelector('#dr');
     const tk = svg.querySelector('#tk');
     const ev = svg.querySelector('#ev');
+
+    // Gambar yang memuat teks dibangun ulang saat bahasa berubah
+    if (drg) drg.innerHTML = '';
+    if (ev) ev.innerHTML = '';
+    zb.textContent = buttonLabels[stageRef.current];
 
     // Path length setup for line draw animations
     svg.querySelectorAll('.d').forEach((e: any) => {
@@ -191,7 +198,7 @@ export const LoginPage: React.FC = () => {
         door(d[0], d[1], d[2]);
       });
       door(16, 468, 'h');
-      drg.insertAdjacentHTML('beforeend', '<text x="26" y="470">PINTU</text>');
+      drg.insertAdjacentHTML('beforeend', '<text x="26" y="470">' + t('lg_door') + '</text>');
     }
 
     // Axonometric R4 elevation view with sewing machine
@@ -243,10 +250,10 @@ export const LoginPage: React.FC = () => {
         h += '<text class="tn" x="196" y="' + (OY[i] + 42 + (i === 3 ? 10 : 0)) + '">' + n + '</text>';
       });
       const lg = [
-        ['01', 'Tingkat C', 'Level C'],
-        ['02', 'Tingkat B · mesin jahit', 'Level B'],
-        ['03', 'Tingkat A', 'Level A'],
-        ['04', 'Rangka baja', 'Steel frame'],
+        ['01', t('lg_level_c'), 'Level C'],
+        ['02', t('lg_level_b'), 'Level B'],
+        ['03', t('lg_level_a'), 'Level A'],
+        ['04', t('lg_steel'), 'Steel frame'],
       ];
       lg.forEach((r, i) => {
         h +=
@@ -256,12 +263,13 @@ export const LoginPage: React.FC = () => {
           r[0] +
           ' · ' +
           r[1] +
-          ' / <tspan class="i" style="fill:var(--ln2);font-style:italic">' +
-          r[2] +
-          '</tspan></text>';
+          (language === 'id'
+            ? ' / <tspan class="i" style="fill:var(--ln2);font-style:italic">' + r[2] + '</tspan>'
+            : '') +
+          '</text>';
       });
       h +=
-        '<text class="ttl" x="8" y="372">AKSONOMETRIK</text><text class="tti" x="8" y="381">Axonometric · Rak R4 · potongan 3 dari 26 kolom</text></g>';
+        '<text class="ttl" x="8" y="372">' + t('lg_axo_title') + '</text><text class="tti" x="8" y="381">' + t('lg_axo_sub') + '</text></g>';
 
       // Frame 04
       h += '<g class="lv" style="--dy:' + dy(3) + '">';
@@ -323,7 +331,7 @@ export const LoginPage: React.FC = () => {
 
       // Callout for machine
       h +=
-        '<g class="cal"><line class="e" style="stroke:var(--acc)" x1="108" y1="112" x2="148" y2="102"/><text class="te ta" x="150" y="101">MESIN JAHIT</text><text class="te" x="150" y="107">Kolom 2 · Slot 2</text></g>';
+        '<g class="cal"><line class="e" style="stroke:var(--acc)" x1="108" y1="112" x2="148" y2="102"/><text class="te ta" x="150" y="101">' + t('lg_callout_machine') + '</text><text class="te" x="150" y="107">' + t('lg_callout_pos') + '</text></g>';
       ev.innerHTML = h;
       ev.querySelectorAll('.mc').forEach((el: any) => el.setAttribute('pathLength', 1));
     }
@@ -398,7 +406,7 @@ export const LoginPage: React.FC = () => {
       zb.removeEventListener('click', toggle);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [language]);
 
   return (
     <div className="login-blueprint-wrapper min-h-screen w-full">
@@ -696,7 +704,7 @@ export const LoginPage: React.FC = () => {
             role="button"
             tabIndex={0}
             aria-pressed="false"
-            aria-label="Denah Warehouse 2. Aktifkan untuk zoom ke area Mechanic"
+            aria-label={t('lg_svg_aria')}
           >
             <defs>
               <pattern id="hw" width="2" height="2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -807,7 +815,7 @@ export const LoginPage: React.FC = () => {
           </svg>
 
           <button className="lb-zb" id="zb" ref={zbRef} type="button">
-            Zoom ke Mechanic
+            {buttonLabels[0]}
           </button>
         </div>
 
@@ -831,11 +839,11 @@ export const LoginPage: React.FC = () => {
             <form onSubmit={handleSubmit} noValidate>
               <div className="flex items-center justify-between mt-3 mb-1">
                 <label className="lb-label !my-0" htmlFor="u">
-                  NIK / Username
+                  {t('nik_username')}
                 </label>
                 {capsLockOn && (
                   <span className="text-[10px] font-bold text-amber-500 font-mono tracking-wider animate-pulse">
-                    Caps Lock aktif
+                    {t('shell_login_caps')}
                   </span>
                 )}
               </div>
@@ -862,7 +870,7 @@ export const LoginPage: React.FC = () => {
                 </label>
                 {capsLockOn && (
                   <span className="text-[10px] font-bold text-amber-500 font-mono tracking-wider animate-pulse">
-                    Caps Lock aktif
+                    {t('shell_login_caps')}
                   </span>
                 )}
               </div>
@@ -888,7 +896,7 @@ export const LoginPage: React.FC = () => {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none cursor-pointer p-0.5"
                   tabIndex={-1}
-                  aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
+                  aria-label={showPassword ? t('um_hide_pw') : t('um_show_pw')}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -901,7 +909,7 @@ export const LoginPage: React.FC = () => {
               )}
 
               <button className="lb-btn" type="submit" disabled={isLoading}>
-                {isLoading ? 'Memverifikasi...' : 'Masuk'}
+                {isLoading ? t('shell_login_verifying') : t('login')}
               </button>
             </form>
           </div>
@@ -918,10 +926,10 @@ export const LoginPage: React.FC = () => {
               }`}
               title={
                 isServerConnected === true
-                  ? 'Server Terhubung'
+                  ? t('lg_srv_on')
                   : isServerConnected === false
-                  ? 'Server Tidak Terhubung'
-                  : 'Memeriksa...'
+                  ? t('lg_srv_off')
+                  : t('lg_srv_check')
               }
             />
           </div>

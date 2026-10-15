@@ -25,7 +25,7 @@ import {
   Package,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
 import { Machine, Transfer, SiteId } from '../types';
@@ -112,32 +112,32 @@ function groupTransfersByBatch(items: Transfer[]): TransferBatch[] {
 }
 
 /** Label & warna status gabungan satu batch, berdasarkan status seluruh mesin anggotanya. */
-function getBatchStatusBadge(batch: TransferBatch): { label: string; className: string } {
+function getBatchStatusBadge(batch: TransferBatch, t: ReturnType<typeof makeT>): { label: string; className: string } {
   const total = batch.machines.length;
   const { inTransit, received, cancelled } = batch.counts;
 
   if (cancelled === total) {
     return {
-      label: 'DIBATALKAN',
+      label: t('xf2_status_cancelled'),
       className: 'bg-rose-50 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800',
     };
   }
   if (received === total) {
     return {
-      label: 'DITERIMA',
+      label: t('xf2_status_received'),
       className: 'bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
     };
   }
   if (inTransit === total) {
     return {
-      label: 'DALAM PERJALANAN',
+      label: t('xf2_status_in_transit'),
       className: 'bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800',
     };
   }
   // Status campuran: sebagian diterima/dibatalkan, sisanya masih jalan
   const doneCount = received + cancelled;
   return {
-    label: `SEBAGIAN SELESAI (${doneCount}/${total})`,
+    label: t('xf2_status_partial', { done: doneCount, total }),
     className: 'bg-sky-50 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border-sky-200 dark:border-sky-800',
   };
 }
@@ -165,6 +165,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   onSelectMachine,
 }) => {
   const { currentUser, language, canAccessSite, canPerformAction } = useAuth();
+  const t = makeT(language);
   const sites = storageService.getSites();
   const allMachines = storageService.getAllMachines();
 
@@ -212,9 +213,12 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     const idx = siteGroups.findIndex((g) => g.siteId === String(siteId));
     return SITE_BADGE_CLASSES[(idx < 0 ? 0 : idx) % SITE_BADGE_CLASSES.length];
   };
-  const multiSiteSummary = `${selectedBatchMachines.length} mesin dari ${siteGroups.length} site: ${siteGroups
-    .map((g) => `${g.siteId} (${g.machines.length})`)
-    .join(', ')} menjadi ${siteGroups.length} transfer`;
+  const multiSiteSummary = t('xf2_multi_summary', {
+    n: selectedBatchMachines.length,
+    sites: t('xf2_n_sites', { n: siteGroups.length }),
+    list: siteGroups.map((g) => `${g.siteId} (${g.machines.length})`).join(', '),
+    transfers: t('xf2_n_transfers', { n: siteGroups.length }),
+  });
 
   // Scan input states
   const [scanInput, setScanInput] = useState<string>('');
@@ -327,32 +331,32 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     // Normalisasi: trim dan bersihkan karakter kontrol
     const clean = rawCode.replace(/[\x00-\x1F\x7F]/g, '').trim();
     if (!clean) {
-      return { valid: false, error: 'Kode kosong', reason: 'EMPTY' };
+      return { valid: false, error: t('xf2_err_empty_code'), reason: 'EMPTY' };
     }
 
     const { machine } = storageService.getMachineByCode(clean);
     if (!machine) {
-      return { valid: false, error: `Barcode/Kode "${clean}": tidak ditemukan`, reason: 'NOT_FOUND' };
+      return { valid: false, error: t('xf2_err_not_found', { code: clean }), reason: 'NOT_FOUND' };
     }
 
     if (currentList.some((m) => m.assetCode.toUpperCase() === machine.assetCode.toUpperCase())) {
-      return { valid: false, error: `Mesin ${machine.assetCode}: sudah ada di daftar`, reason: 'ALREADY_IN_LIST' };
+      return { valid: false, error: t('xf2_err_in_list', { code: machine.assetCode }), reason: 'ALREADY_IN_LIST' };
     }
 
     if (!canAccessSite(machine.siteId)) {
-      return { valid: false, error: `Mesin ${machine.assetCode}: di luar akses Anda (Site ${machine.siteId})`, reason: 'NO_ACCESS' };
+      return { valid: false, error: t('xf2_err_no_access', { code: machine.assetCode, site: machine.siteId }), reason: 'NO_ACCESS' };
     }
 
     if (machine.pendingTransferId) {
-      return { valid: false, error: `Mesin ${machine.assetCode}: sedang dalam proses transfer lain`, reason: 'PENDING' };
+      return { valid: false, error: t('xf2_err_pending', { code: machine.assetCode }), reason: 'PENDING' };
     }
 
     if (machine.status === 'SOLD') {
-      return { valid: false, error: `Mesin ${machine.assetCode}: berstatus SOLD/Afkir`, reason: 'SOLD' };
+      return { valid: false, error: t('xf2_err_sold', { code: machine.assetCode }), reason: 'SOLD' };
     }
 
     if (machine.siteId === selectedToSite) {
-      return { valid: false, error: `Mesin ${machine.assetCode}: sudah berada di site tujuan (${selectedToSite})`, reason: 'SAME_SITE' };
+      return { valid: false, error: t('xf2_err_same_site', { code: machine.assetCode, site: selectedToSite }), reason: 'SAME_SITE' };
     }
 
     return { valid: true, machine };
@@ -366,7 +370,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     const res = validateMachineForTransfer(raw, selectedBatchMachines);
     if (res.valid) {
       soundService.playSuccess();
-      showScanToast('success', `${res.machine.assetCode} ditambahkan (${selectedBatchMachines.length + 1} mesin)`);
+      showScanToast('success', t('xf2_toast_added', { code: res.machine.assetCode, n: selectedBatchMachines.length + 1 }));
       setSelectedBatchMachines((prev) => [res.machine, ...prev]);
       setRecentlyAddedCode(res.machine.assetCode);
       setScanError(null);
@@ -389,7 +393,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     const res = validateMachineForTransfer(code, selectedBatchMachines);
     if (res.valid) {
       soundService.playSuccess();
-      showScanToast('success', `${res.machine.assetCode} ditambahkan (${selectedBatchMachines.length + 1} mesin)`);
+      showScanToast('success', t('xf2_toast_added', { code: res.machine.assetCode, n: selectedBatchMachines.length + 1 }));
       setSelectedBatchMachines((prev) =>
         prev.some((m) => m.assetCode === res.machine.assetCode) ? prev : [res.machine, ...prev]
       );
@@ -398,7 +402,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       setTimeout(() => setRecentlyAddedCode(null), 2500);
       setCameraScanStatus({
         type: 'success',
-        text: `Ditambahkan: ${res.machine.assetCode} (${selectedBatchMachines.length + 1} mesin di daftar)`,
+        text: t('xf2_cam_added', { code: res.machine.assetCode, n: selectedBatchMachines.length + 1 }),
       });
     } else {
       soundService.playError();
@@ -423,7 +427,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       .filter((c) => c.length > 0);
 
     if (codes.length === 0) {
-      setPasteSummary('Tidak ada kode valid yang dimasukkan.');
+      setPasteSummary(t('xfer_err_no_codes'));
       return;
     }
 
@@ -449,12 +453,12 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       showScanToast(
         'success',
         skippedItems.length > 0
-          ? `${addedCount} mesin ditambahkan, ${skippedItems.length} dilewati`
-          : `${addedCount} mesin ditambahkan`
+          ? t('xf2_paste_added_skipped', { n: addedCount, skipped: skippedItems.length })
+          : t('xf2_paste_added', { n: addedCount })
       );
     } else {
       soundService.playError();
-      showScanToast('error', `Tidak ada mesin yang ditambahkan (${skippedItems.length} dilewati)`);
+      showScanToast('error', t('xf2_paste_none_added', { skipped: skippedItems.length }));
     }
 
     if (skippedItems.length > 0) {
@@ -462,10 +466,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         .slice(0, 3)
         .map((s) => s.error)
         .join('; ');
-      const moreText = skippedItems.length > 3 ? ` dan ${skippedItems.length - 3} lainnya` : '';
-      setPasteSummary(`${addedCount} mesin ditambahkan, ${skippedItems.length} dilewati (${sampleErrors}${moreText}).`);
+      const moreText = skippedItems.length > 3 ? t('xf2_paste_more', { n: skippedItems.length - 3 }) : '';
+      setPasteSummary(t('xf2_paste_summary_skipped', { n: addedCount, skipped: skippedItems.length, errors: sampleErrors, more: moreText }));
     } else {
-      setPasteSummary(`Semua ${addedCount} mesin berhasil ditambahkan ke daftar!`);
+      setPasteSummary(t('xf2_paste_all', { n: addedCount }));
     }
 
     setTimeout(() => {
@@ -508,9 +512,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
 
     // Mode multi-site mati: perilaku lama, mesin dari >1 site ditolak (server juga menolak: MIXED_SITES).
     if (!multiSite && siteGroups.length > 1) {
-      const msg = `Semua mesin dalam satu transfer harus berasal dari satu site (ditemukan: ${siteGroups
-        .map((g) => g.siteId)
-        .join(', ')}).`;
+      const msg = t('xf2_err_mixed_sites', { sites: siteGroups.map((g) => g.siteId).join(', ') });
       soundService.playError();
       setFeedback({ type: 'error', message: msg });
       showScanToast('error', msg, 4000);
@@ -538,31 +540,34 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             itemNotes: batchNotes,
           });
           if (res.success) {
-            sent.push({ siteId: g.siteId, count: res.count, transferNo: res.transferNo, message: res.message, codes });
+            sent.push({ siteId: g.siteId, count: res.count, transferNo: res.transferNo, message: localizeMessage(res.message, language), codes });
           } else {
-            failed.push({ siteId: g.siteId, count: codes.length, message: res.message });
+            failed.push({ siteId: g.siteId, count: codes.length, message: localizeMessage(res.message, language) });
           }
         } catch (err: any) {
-          failed.push({ siteId: g.siteId, count: codes.length, message: err?.message || 'Gagal mengirim transfer.' });
+          failed.push({ siteId: g.siteId, count: codes.length, message: localizeMessage(err?.message || t('xfer_err_send'), language) });
         }
       }
 
       // Pesan hasil: satu transfer -> pesan server apa adanya; multi-site -> semua nomor TRF per site.
       let message: string;
       if (groups.length === 1) {
-        message = sent[0]?.message ?? failed[0]?.message ?? 'Gagal mengirim transfer.';
+        message = sent[0]?.message ?? failed[0]?.message ?? t('xfer_err_send');
       } else {
         const totalSent = sent.reduce((n, r) => n + r.count, 0);
         const lines: string[] = [];
         if (sent.length > 0) {
           lines.push(
-            `${totalSent} mesin terkirim ke ${selectedToSite} dalam ${sent.length} transfer: ` +
-              sent.map((r) => `${r.siteId} (${r.count}) -> ${r.transferNo ?? 'TRF'}`).join(', ') +
-              '.'
+            t('xf2_multi_sent', {
+              n: totalSent,
+              to: selectedToSite,
+              transfers: t('xf2_n_transfers', { n: sent.length }),
+              list: sent.map((r) => `${r.siteId} (${r.count}) -> ${r.transferNo ?? 'TRF'}`).join(', '),
+            })
           );
         }
         for (const f of failed) {
-          lines.push(`GAGAL ${f.siteId} (${f.count} mesin): ${f.message}`);
+          lines.push(t('xf2_multi_failed', { site: f.siteId, n: f.count, message: f.message }));
         }
         message = lines.join('\n');
       }
@@ -594,7 +599,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       }
     } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: err.message || 'Gagal mengirim transfer.' });
+      setFeedback({ type: 'error', message: localizeMessage(err.message || t('xfer_err_send'), language) });
     } finally {
       setIsSending(false);
     }
@@ -616,38 +621,41 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
 
       if (res.success) {
         soundService.playSuccess();
-        setFeedback({ type: 'success', message: res.message });
+        setFeedback({ type: 'success', message: localizeMessage(res.message, language) });
         setReceivingTransfer(null);
         setReceiveTargetLocationId('');
         setReceiveNote('');
       } else {
         soundService.playError();
-        setFeedback({ type: 'error', message: res.message });
+        setFeedback({ type: 'error', message: localizeMessage(res.message, language) });
       }
     } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: err.message || 'Gagal menerima transfer.' });
+      setFeedback({ type: 'error', message: localizeMessage(err.message || t('xfer_err_receive'), language) });
     } finally {
       setIsReceiving(false);
     }
   };
 
   // Handle Cancel Transfer
-  const handleCancelTransfer = async (transferId: string) => {
+  const handleCancelTransfer = async (batch: TransferBatch) => {
     if (!currentUser || cancellingId) return;
+    const transferId = batch.representativeTransferId;
+    const inTransitIds = batch.machines.filter((m) => m.status === 'IN_TRANSIT').map((m) => m.transferId);
+    if (inTransitIds.length === 0) return;
     setCancellingId(transferId);
     try {
-      const res = await storageService.cancelTransfer(transferId, currentUser.username, currentUser.siteAccess);
+      const res = await storageService.cancelTransfers(inTransitIds);
       if (res.success) {
         soundService.playSuccess();
-        setFeedback({ type: 'success', message: res.message });
+        setFeedback({ type: 'success', message: localizeMessage(res.message, language) });
       } else {
         soundService.playError();
-        setFeedback({ type: 'error', message: res.message });
+        setFeedback({ type: 'error', message: localizeMessage(res.message, language) });
       }
     } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: err.message || 'Gagal membatalkan transfer.' });
+      setFeedback({ type: 'error', message: localizeMessage(err.message || t('xfer_err_cancel'), language) });
     } finally {
       setCancellingId(null);
     }
@@ -661,7 +669,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       const orderId = storageService.getOrderIdForTransfer(transferId);
       if (orderId == null) {
         soundService.playError();
-        setFeedback({ type: 'error', message: 'Data transfer ini tidak ditemukan. Segarkan halaman lalu coba lagi.' });
+        setFeedback({ type: 'error', message: t('xf2_err_transfer_not_found') });
         return;
       }
       const res = await storageService.getSuratJalanData(orderId);
@@ -669,11 +677,11 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         openSuratJalan(res.data);
       } else {
         soundService.playError();
-        setFeedback({ type: 'error', message: res.message || 'Gagal menyiapkan surat jalan.' });
+        setFeedback({ type: 'error', message: localizeMessage(res.message || t('xf2_err_sj'), language) });
       }
     } catch (err: any) {
       soundService.playError();
-      setFeedback({ type: 'error', message: err.message || 'Gagal menyiapkan surat jalan.' });
+      setFeedback({ type: 'error', message: localizeMessage(err.message || t('xf2_err_sj'), language) });
     } finally {
       setPrintingId(null);
     }
@@ -688,11 +696,11 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             <ArrowRightLeft className="w-4 h-4" />
           </div>
           <h1 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
-            {getTranslation('transfers', language)} (Alur 2 Langkah)
+            {getTranslation('transfers', language)} {t('xf2_two_step')}
           </h1>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Proses transfer antar pabrik: (1) Pengirim memindai mesin & mengirim (In Transit), (2) Penerima mengonfirmasi penerimaan & memilih lokasi tujuan.
+          {t('xfer_desc')}
         </p>
       </div>
 
@@ -706,10 +714,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
               ? 'bg-emerald-700 text-white shadow-xs'
               : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700/60'
           }`}
-          aria-label="Tab Menunggu Diterima"
+          aria-label={t('xf2_tab_inbound_aria')}
         >
           <Download className="w-4 h-4" />
-          <span>Menunggu Diterima ({inboundTransfers.length})</span>
+          <span>{t('xfer_tab_inbound')} ({inboundTransfers.length})</span>
         </button>
 
         <button
@@ -720,10 +728,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
               ? 'bg-emerald-700 text-white shadow-xs'
               : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700/60'
           }`}
-          aria-label="Tab Transfer Terkirim"
+          aria-label={t('xf2_tab_outbound_aria')}
         >
           <Send className="w-4 h-4" />
-          <span>Transfer Terkirim</span>
+          <span>{t('xfer_tab_outbound')}</span>
         </button>
 
         <button
@@ -734,10 +742,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
               ? 'bg-emerald-700 text-white shadow-xs'
               : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700/60'
           }`}
-          aria-label="Tab Kirim Transfer Baru"
+          aria-label={t('xf2_tab_send_aria')}
         >
           <ArrowRightLeft className="w-4 h-4" />
-          <span>Kirim Transfer Baru {selectedBatchMachines.length > 0 && `(${selectedBatchMachines.length})`}</span>
+          <span>{t('xfer_tab_send')} {selectedBatchMachines.length > 0 && `(${selectedBatchMachines.length})`}</span>
         </button>
       </div>
 
@@ -765,63 +773,63 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Download className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
-              <span>Daftar Mesin yang Sedang Dikirim Menuju Site Anda</span>
+              <span>{t('xfer_inbound_title')}</span>
             </h2>
-            <span className="text-xs text-slate-500">{inboundTransfers.length} transfer</span>
+            <span className="text-xs text-slate-500">{t('xf2_n_transfers', { n: inboundTransfers.length })}</span>
           </div>
 
           {inboundTransfers.length === 0 ? (
             <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-              Tidak ada mesin yang sedang dalam perjalanan menuju site Anda.
+              {t('xfer_inbound_empty')}
             </div>
           ) : (
             <div className="space-y-3">
-              {inboundTransfers.map((t) => {
-                const sentTime = new Date(t.sentAt).getTime();
+              {inboundTransfers.map((tr) => {
+                const sentTime = new Date(tr.sentAt).getTime();
                 const isOverdue = (Date.now() - sentTime) / (1000 * 3600 * 24) > overdueDaysLimit;
 
                 return (
                   <div
-                    key={t.transferId}
+                    key={tr.transferId}
                     className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-sm">{t.assetCode}</span>
-                        <span className="font-mono text-[10px] text-slate-400">({t.transferId})</span>
+                        <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-sm">{tr.assetCode}</span>
+                        <span className="font-mono text-[10px] text-slate-400">({tr.transferId})</span>
                         {isOverdue && (
                           <span className="text-[10px] font-bold bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800 flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3 text-rose-600 dark:text-rose-400" />
-                            <span>Terlambat &gt; {overdueDaysLimit} Hari</span>
+                            <span>{t('xf2_overdue', { n: overdueDaysLimit })}</span>
                           </span>
                         )}
                       </div>
 
                       <div className="text-slate-700 dark:text-slate-300">
-                        Dari Site: <span className="font-bold text-amber-700 dark:text-amber-400">{t.fromSite}</span> → Menuju Site:{' '}
-                        <span className="font-bold text-emerald-700 dark:text-emerald-400">{t.toSite}</span>
+                        {t('xfer_from_site')} <span className="font-bold text-amber-700 dark:text-amber-400">{tr.fromSite}</span> → {t('xf2_to_site')}{' '}
+                        <span className="font-bold text-emerald-700 dark:text-emerald-400">{tr.toSite}</span>
                       </div>
 
                       <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Dikirim oleh: <span className="text-slate-800 dark:text-slate-200 font-semibold">{t.sentBy}</span> pada{' '}
-                        {new Date(t.sentAt).toLocaleString('id-ID')}
+                        {t('xfer_sent_by')} <span className="text-slate-800 dark:text-slate-200 font-semibold">{tr.sentBy}</span> {t('xf2_on')}{' '}
+                        {new Date(tr.sentAt).toLocaleString(localeOf(language))}
                       </div>
 
-                      {t.note && <div className="text-[11px] text-slate-600 dark:text-slate-400 italic">Catatan: {t.note}</div>}
-                      {t.senderNote && (
-                        <div className="text-[11px] text-amber-700 dark:text-amber-400 italic">Catatan Pengirim: {t.senderNote}</div>
+                      {tr.note && <div className="text-[11px] text-slate-600 dark:text-slate-400 italic">{t('xf2_note_prefix')} {tr.note}</div>}
+                      {tr.senderNote && (
+                        <div className="text-[11px] text-amber-700 dark:text-amber-400 italic">{t('xf2_sender_note')} {tr.senderNote}</div>
                       )}
                     </div>
 
                     <button
                       type="button"
                       onClick={() => {
-                        setReceivingTransfer(t);
+                        setReceivingTransfer(tr);
                         setReceiveTargetLocationId('');
                         setReceiveNote('');
                       }}
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-xs flex items-center justify-center gap-1.5 self-start sm:self-auto transition-transform active:scale-95 min-h-[40px] cursor-pointer"
-                      aria-label={`Terima mesin ${t.assetCode}`}
+                      aria-label={t('xf2_receive_aria', { code: tr.assetCode })}
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>{getTranslation('receive_transfer', language)}</span>
@@ -839,17 +847,17 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Send className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
-            <span>Riwayat Transfer Keluar dari Site Anda</span>
+            <span>{t('xfer_outbound_title')}</span>
           </h2>
 
           {outboundBatches.length === 0 ? (
             <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-              Belum ada transfer yang dikirim dari site Anda.
+              {t('xf2_outbound_empty')}
             </div>
           ) : (
             <div className="space-y-3">
               {pagedOutboundBatches.map((batch) => {
-                const badge = getBatchStatusBadge(batch);
+                const badge = getBatchStatusBadge(batch, t);
                 const isExpanded = expandedBatchId === batch.batchId;
                 const canCancel = batch.counts.inTransit > 0;
                 // Batch yang seluruh mesinnya dibatalkan: surat jalan tidak tersedia
@@ -871,19 +879,19 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                             {badge.label}
                           </span>
                           <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
-                            {batch.machines.length} mesin
+                            {t('xf2_n_machines', { n: batch.machines.length })}
                           </span>
                         </div>
 
                         <div className="text-slate-700 dark:text-slate-300">
-                          Dari: <span className="font-bold text-amber-700 dark:text-amber-400">{batch.fromSite}</span> → Ke:{' '}
+                          {t('xfer_from')} <span className="font-bold text-amber-700 dark:text-amber-400">{batch.fromSite}</span> → {t('xfer_to')}{' '}
                           <span className="font-bold text-emerald-700 dark:text-emerald-400">{batch.toSite}</span>
                         </div>
 
                         <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Dikirim: {new Date(batch.sentAt).toLocaleString('id-ID')} ({batch.sentBy})
+                          {t('xfer_sent_label')} {new Date(batch.sentAt).toLocaleString(localeOf(language))} ({batch.sentBy})
                           {batch.receivedAt && (
-                            <span> • Diterima terakhir: {new Date(batch.receivedAt).toLocaleString('id-ID')} ({batch.receivedBy})</span>
+                            <span> • {t('xf2_last_received')} {new Date(batch.receivedAt).toLocaleString(localeOf(language))} ({batch.receivedBy})</span>
                           )}
                         </div>
 
@@ -891,10 +899,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                           type="button"
                           onClick={() => setExpandedBatchId(isExpanded ? null : batch.batchId)}
                           className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-semibold flex items-center gap-1 min-h-[28px] cursor-pointer"
-                          aria-label={isExpanded ? 'Sembunyikan daftar mesin' : 'Tampilkan daftar mesin'}
+                          aria-label={isExpanded ? t('xf2_hide_machines') : t('xf2_show_machines_aria')}
                         >
                           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                          <span>{isExpanded ? 'Sembunyikan daftar mesin' : 'Lihat daftar mesin'}</span>
+                          <span>{isExpanded ? t('xf2_hide_machines') : t('xf2_view_machines')}</span>
                         </button>
                       </div>
 
@@ -902,9 +910,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                         {isFullyCancelled ? (
                           <span
                             className="px-3 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 italic"
-                            title="Transfer yang dibatalkan tidak memiliki surat jalan"
+                            title={t('xf2_cancelled_no_sj_title')}
                           >
-                            Surat jalan tidak tersedia (dibatalkan)
+                            {t('xf2_sj_unavailable')}
                           </span>
                         ) : (
                           <button
@@ -912,26 +920,26 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                             onClick={() => handlePrintSuratJalan(batch.representativeTransferId)}
                             disabled={printingId === batch.representativeTransferId}
                             className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors min-h-[40px] cursor-pointer"
-                            aria-label={`Cetak surat jalan untuk batch ${batch.batchId}`}
-                            title="Mencetak satu manifest lengkap untuk seluruh mesin dalam pengiriman ini"
+                            aria-label={t('xf2_print_sj_aria', { batch: batch.batchId })}
+                            title={t('xf2_print_sj_title')}
                           >
                             <Printer className="w-3.5 h-3.5" />
-                            <span>{printingId === batch.representativeTransferId ? 'Menyiapkan...' : 'Surat Jalan'}</span>
+                            <span>{printingId === batch.representativeTransferId ? t('xf2_preparing') : t('xf2_sj_button')}</span>
                           </button>
                         )}
 
                         {canCancel && (
                           <button
                             type="button"
-                            onClick={() => handleCancelTransfer(batch.representativeTransferId)}
+                            onClick={() => handleCancelTransfer(batch)}
                             disabled={cancellingId === batch.representativeTransferId}
                             className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900 disabled:opacity-50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors min-h-[40px] cursor-pointer"
-                            aria-label={`Batalkan batch ${batch.batchId}`}
-                            title="Membatalkan semua mesin yang masih Dalam Perjalanan pada batch ini"
+                            aria-label={t('xf2_cancel_batch_aria', { batch: batch.batchId })}
+                            title={t('xf2_cancel_batch_title')}
                           >
                             <XCircle className="w-3.5 h-3.5" />
                             <span>
-                              {cancellingId === batch.representativeTransferId ? 'Membatalkan...' : getTranslation('cancel_transfer', language)}
+                              {cancellingId === batch.representativeTransferId ? t('xfer_cancelling') : getTranslation('cancel_transfer', language)}
                             </span>
                           </button>
                         )}
@@ -970,11 +978,14 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
           {outboundBatches.length > OUTBOUND_PAGE_SIZE && (
             <nav
               className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-xs"
-              aria-label="Paginasi riwayat transfer terkirim"
+              aria-label={t('xfer_pagination_label')}
             >
               <span className="text-slate-500 dark:text-slate-400">
-                Menampilkan {(safeOutboundPage - 1) * OUTBOUND_PAGE_SIZE + 1}-
-                {Math.min(safeOutboundPage * OUTBOUND_PAGE_SIZE, outboundBatches.length)} dari {outboundBatches.length} batch pengiriman
+                {t('xf2_showing', {
+                  from: (safeOutboundPage - 1) * OUTBOUND_PAGE_SIZE + 1,
+                  to: Math.min(safeOutboundPage * OUTBOUND_PAGE_SIZE, outboundBatches.length),
+                  total: outboundBatches.length,
+                })}
               </span>
               <div className="flex flex-wrap items-center justify-center gap-1">
                 <button
@@ -982,10 +993,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                   onClick={() => setOutboundPage(safeOutboundPage - 1)}
                   disabled={safeOutboundPage <= 1}
                   className="px-3 py-1.5 min-h-[40px] min-w-[40px] rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1"
-                  aria-label="Halaman sebelumnya"
+                  aria-label={t('xfer_prev_page')}
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Sebelumnya</span>
+                  <span className="hidden sm:inline">{t('previous')}</span>
                 </button>
                 {buildPageList(safeOutboundPage, outboundTotalPages).map((p, i) =>
                   p === '…' ? (
@@ -995,7 +1006,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       key={p}
                       type="button"
                       onClick={() => setOutboundPage(p)}
-                      aria-label={`Halaman ${p}`}
+                      aria-label={t('xfer_page_n', { n: p })}
                       aria-current={p === safeOutboundPage ? 'page' : undefined}
                       className={`px-3 py-1.5 min-h-[40px] min-w-[40px] rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
                         p === safeOutboundPage
@@ -1012,9 +1023,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                   onClick={() => setOutboundPage(safeOutboundPage + 1)}
                   disabled={safeOutboundPage >= outboundTotalPages}
                   className="px-3 py-1.5 min-h-[40px] min-w-[40px] rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1"
-                  aria-label="Halaman berikutnya"
+                  aria-label={t('xfer_next_page')}
                 >
-                  <span className="hidden sm:inline">Berikutnya</span>
+                  <span className="hidden sm:inline">{t('next')}</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1037,7 +1048,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 value={selectedToSite}
                 onChange={(e) => setSelectedToSite(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-white focus:border-emerald-500 font-bold transition-colors min-h-[40px]"
-                aria-label="Pilih Site Tujuan Transfer"
+                aria-label={t('xf2_select_target_aria')}
               >
                 {sites.map((s) => (
                   <option key={s.siteId} value={s.siteId}>
@@ -1051,7 +1062,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label htmlFor="scan-transfer-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Scan Barcode / Kode Aset / Nomor Seri:
+                  {t('xfer_scan_label')}
                 </label>
                 <div className="flex items-center gap-1">
                 <button
@@ -1061,19 +1072,19 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                     setIsCameraScanOpen(true);
                   }}
                   className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-semibold flex items-center gap-1 min-h-[36px] px-2"
-                  aria-label="Buka pemindai kamera"
+                  aria-label={t('xf2_open_camera_aria')}
                 >
                   <QrCode className="w-3.5 h-3.5" />
-                  <span>Scan kamera</span>
+                  <span>{t('xf2_scan_camera')}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsPasteModeOpen((prev) => !prev)}
                   className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-semibold flex items-center gap-1 min-h-[36px] px-2"
-                  aria-label="Buka area tempel banyak kode"
+                  aria-label={t('xf2_open_paste_aria')}
                 >
                   <ClipboardList className="w-3.5 h-3.5" />
-                  <span>{isPasteModeOpen ? 'Tutup Tempel Banyak' : 'Tempel banyak kode'}</span>
+                  <span>{isPasteModeOpen ? t('xfer_close_paste') : t('xf2_paste_open')}</span>
                   {isPasteModeOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
                 </div>
@@ -1093,20 +1104,20 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                     if (scanError) setScanError(null);
                   }}
                   onKeyDown={handleScanInputKeyDown}
-                  placeholder="Arahkan barcode scanner fisik atau ketik kode lalu tekan Enter..."
+                  placeholder={t('xfer_scan_ph')}
                   className="w-full pl-10 pr-24 py-3 bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border-2 border-emerald-500 rounded-2xl text-xs text-slate-900 dark:text-white font-mono placeholder:text-slate-400 shadow-xs focus:ring-2 focus:ring-emerald-500/20 transition-all min-h-[44px]"
                   autoComplete="off"
                   autoFocus
-                  aria-label="Scan barcode atau kode aset mesin"
+                  aria-label={t('xf2_scan_input_aria')}
                 />
                 <button
                   type="button"
                   onClick={handleProcessScanInput}
                   disabled={!scanInput.trim()}
                   className="absolute right-2 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-xs min-h-[34px] cursor-pointer"
-                  aria-label="Tambahkan scan"
+                  aria-label={t('xf2_add_scan_aria')}
                 >
-                  Tambah
+                  {t('add')}
                 </button>
               </div>
 
@@ -1125,18 +1136,18 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                     <ClipboardList className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>Tempel Banyak Kode / Barcode</span>
+                    <span>{t('xfer_paste_toggle')}</span>
                   </span>
-                  <span className="text-[11px] text-slate-400">Pisahkan dengan spasi, koma, titik koma, atau baris baru</span>
+                  <span className="text-[11px] text-slate-400">{t('xfer_paste_hint')}</span>
                 </div>
 
                 <textarea
                   value={pasteInput}
                   onChange={(e) => setPasteInput(e.target.value)}
-                  placeholder="Contoh:&#10;IDN-8-2009-1396&#10;000000066145&#10;IDN-9-2009-1397"
+                  placeholder={t('xfer_paste_ph')}
                   rows={3}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs text-slate-900 dark:text-white font-mono placeholder:text-slate-400 focus:border-emerald-500 transition-colors"
-                  aria-label="Area teks tempel banyak kode"
+                  aria-label={t('xf2_paste_area_aria')}
                 />
 
                 <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1145,10 +1156,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                     onClick={handleProcessPasteBatch}
                     disabled={!pasteInput.trim()}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 min-h-[40px] cursor-pointer"
-                    aria-label="Tambahkan semua kode yang ditempel"
+                    aria-label={t('xf2_add_pasted_aria')}
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Tambahkan Semua ke Daftar</span>
+                    <span>{t('xfer_add_all')}</span>
                   </button>
 
                   {pasteSummary && (
@@ -1166,10 +1177,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                     <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    <span>Daftar Mesin Siap Dikirim:</span>
+                    <span>{t('xfer_ready_list')}</span>
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-mono font-black text-xs border border-emerald-200 dark:border-emerald-800">
-                    {selectedBatchMachines.length} mesin
+                    {t('xf2_n_machines', { n: selectedBatchMachines.length })}
                   </span>
                 </div>
 
@@ -1178,10 +1189,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                     type="button"
                     onClick={handleClearBatch}
                     className="text-xs text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 font-semibold flex items-center gap-1 min-h-[36px] px-2 cursor-pointer"
-                    aria-label="Kosongkan seluruh daftar mesin yang akan dikirim"
+                    aria-label={t('xf2_clear_aria')}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Kosongkan daftar</span>
+                    <span>{t('xf2_clear_list')}</span>
                   </button>
                 )}
               </div>
@@ -1192,9 +1203,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                   className="flex items-center justify-between gap-3 p-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 cursor-pointer"
                 >
                   <span className="text-xs">
-                    <span className="block font-bold text-violet-900 dark:text-violet-200">Mode multi-site (admin)</span>
+                    <span className="block font-bold text-violet-900 dark:text-violet-200">{t('xf2_multi_mode')}</span>
                     <span className="block text-[11px] text-violet-700 dark:text-violet-300">
-                      Izinkan mesin dari beberapa site dalam satu daftar. Dikirim sebagai satu transfer per site asal.
+                      {t('xf2_multi_desc')}
                     </span>
                   </span>
                   <input
@@ -1204,24 +1215,23 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                     checked={multiSiteMode}
                     onChange={(e) => setMultiSiteMode(e.target.checked)}
                     className="h-5 w-9 shrink-0 cursor-pointer accent-violet-600"
-                    aria-label="Mode multi-site (admin)"
+                    aria-label={t('xf2_multi_mode')}
                   />
                 </label>
               )}
 
               {!multiSite && siteGroups.length > 1 && (
                 <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-[11px] text-amber-800 dark:text-amber-300 font-semibold">
-                  Daftar berisi mesin dari {siteGroups.length} site ({siteGroups.map((g) => g.siteId).join(', ')}). Satu transfer
-                  hanya boleh berasal dari satu site, hapus sebagian mesin
-                  {isAdminUser ? ' atau nyalakan Mode multi-site.' : '.'}
+                  {t('xf2_mixed_warning', { n: siteGroups.length, sites: siteGroups.map((g) => g.siteId).join(', ') })}
+                  {isAdminUser ? t('xf2_or_enable_multi') : '.'}
                 </div>
               )}
 
               {selectedBatchMachines.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-xs rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-1">
                   <QrCode className="w-7 h-7 mx-auto text-slate-300 dark:text-slate-600 mb-1" />
-                  <p className="font-semibold text-slate-600 dark:text-slate-400">Daftar transfer masih kosong.</p>
-                  <p className="text-[11px]">Gunakan input scan di atas untuk menambahkan mesin ke dalam batch pengiriman ini.</p>
+                  <p className="font-semibold text-slate-600 dark:text-slate-400">{t('xfer_empty_list_title')}</p>
+                  <p className="text-[11px]">{t('xfer_empty_list_desc')}</p>
                 </div>
               ) : (
                 <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-xs">
@@ -1231,12 +1241,12 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 sticky top-0 border-b border-slate-200 dark:border-slate-700 font-bold">
                         <tr>
                           <th className="py-2.5 px-3 w-10 text-center">#</th>
-                          <th className="py-2.5 px-3">Kode Aset / Barcode</th>
-                          <th className="py-2.5 px-3">Nama Mesin</th>
-                          <th className="py-2.5 px-3">Lokasi Saat Ini</th>
-                          <th className="py-2.5 px-3">Site Asal</th>
-                          <th className="py-2.5 px-3 w-40">Catatan Pengirim</th>
-                          <th className="py-2.5 px-3 text-right w-16">Aksi</th>
+                          <th className="py-2.5 px-3">{t('xfer_col_asset')}</th>
+                          <th className="py-2.5 px-3">{t('xfer_col_name')}</th>
+                          <th className="py-2.5 px-3">{t('current_location')}</th>
+                          <th className="py-2.5 px-3">{t('xfer_col_origin')}</th>
+                          <th className="py-2.5 px-3 w-40">{t('xf2_col_sender_note')}</th>
+                          <th className="py-2.5 px-3 text-right w-16">{t('actions')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-800">
@@ -1286,9 +1296,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                                   type="text"
                                   value={batchNotes[m.assetCode] ?? ''}
                                   onChange={(e) => handleBatchNoteChange(m.assetCode, e.target.value)}
-                                  placeholder="Opsional..."
+                                  placeholder={t('xf2_optional_ph')}
                                   className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-900 dark:text-white focus:border-emerald-500 placeholder:text-slate-400 min-h-[32px]"
-                                  aria-label={`Catatan pengirim untuk mesin ${m.assetCode}`}
+                                  aria-label={t('xf2_sender_note_aria', { code: m.assetCode })}
                                 />
                               </td>
                               <td className="py-2.5 px-3 text-right">
@@ -1296,8 +1306,8 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                                   type="button"
                                   onClick={() => handleRemoveFromBatch(m.assetCode)}
                                   className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950 rounded-lg transition-colors min-h-[32px] min-w-[32px] inline-flex items-center justify-center cursor-pointer"
-                                  title="Hapus dari daftar"
-                                  aria-label={`Hapus mesin ${m.assetCode} dari daftar`}
+                                  title={t('remove_from_list')}
+                                  aria-label={t('xf2_remove_list_aria', { code: m.assetCode })}
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -1344,7 +1354,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                                 </div>
                               )}
                               <div className="text-[11px] text-slate-500 font-mono">
-                                Lokasi: {m.locationId}
+                                {t('xf2_location_prefix')} {m.locationId}
                               </div>
                             </div>
 
@@ -1352,7 +1362,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                               type="button"
                               onClick={() => handleRemoveFromBatch(m.assetCode)}
                               className="p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950 rounded-xl min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer shrink-0"
-                              aria-label={`Hapus mesin ${m.assetCode}`}
+                              aria-label={t('xf2_remove_aria', { code: m.assetCode })}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -1362,9 +1372,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                             type="text"
                             value={batchNotes[m.assetCode] ?? ''}
                             onChange={(e) => handleBatchNoteChange(m.assetCode, e.target.value)}
-                            placeholder="Catatan Pengirim (kondisi mesin saat dikirim) - opsional..."
+                            placeholder={t('xf2_sender_note_ph')}
                             className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-900 dark:text-white focus:border-emerald-500 placeholder:text-slate-400 min-h-[36px]"
-                            aria-label={`Catatan pengirim untuk mesin ${m.assetCode}`}
+                            aria-label={t('xf2_sender_note_aria', { code: m.assetCode })}
                           />
                         </div>
                       );
@@ -1378,47 +1388,47 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
               <div>
                 <label htmlFor="vehicle-no-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Nomor Kendaraan / Truk (Opsional):
+                  {t('xfer_vehicle')}
                 </label>
                 <input
                   id="vehicle-no-input"
                   type="text"
                   value={vehicleNo}
                   onChange={(e) => setVehicleNo(e.target.value)}
-                  placeholder="Contoh: B 1234 XYZ"
+                  placeholder={t('xfer_vehicle_ph')}
                   className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-xs text-slate-900 dark:text-white focus:border-emerald-500 min-h-[40px]"
-                  aria-label="Nomor kendaraan truk"
+                  aria-label={t('xf2_vehicle_aria')}
                 />
               </div>
 
               <div>
                 <label htmlFor="driver-name-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Nama Sopir (Opsional):
+                  {t('xfer_driver')}
                 </label>
                 <input
                   id="driver-name-input"
                   type="text"
                   value={driverName}
                   onChange={(e) => setDriverName(e.target.value)}
-                  placeholder="Contoh: Pak Joko"
+                  placeholder={t('xfer_driver_ph')}
                   className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-xs text-slate-900 dark:text-white focus:border-emerald-500 min-h-[40px]"
-                  aria-label="Nama sopir pengantar"
+                  aria-label={t('xf2_driver_aria')}
                 />
               </div>
             </div>
 
             <div>
               <label htmlFor="transfer-note-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Catatan / Alasan Transfer (Opsional):
+                {t('xfer_note')}
               </label>
               <input
                 id="transfer-note-input"
                 type="text"
                 value={transferNote}
                 onChange={(e) => setTransferNote(e.target.value)}
-                placeholder="Contoh: Pemenuhan kapasitas order export site tujuan"
+                placeholder={t('xfer_note_ph')}
                 className="w-full bg-slate-50 dark:bg-slate-900 hover:bg-white focus:bg-white dark:hover:bg-slate-800 dark:focus:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-white focus:border-emerald-500 placeholder:text-slate-400 min-h-[40px]"
-                aria-label="Catatan atau alasan transfer"
+                aria-label={t('xf2_note_aria')}
               />
             </div>
 
@@ -1436,15 +1446,15 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 type="submit"
                 disabled={isSending || selectedBatchMachines.length === 0}
                 className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl text-sm font-extrabold shadow-sm flex items-center justify-center gap-2 transition-transform active:scale-98 min-h-[48px] cursor-pointer"
-                aria-label={`Kirim ${selectedBatchMachines.length} mesin ke site ${selectedToSite}`}
+                aria-label={t('xf2_send_aria', { n: selectedBatchMachines.length, site: selectedToSite })}
               >
                 <Send className="w-4 h-4" />
                 <span>
                   {isSending
-                    ? 'Sedang Mengirim ke Server...'
+                    ? t('xfer_sending')
                     : multiSite && siteGroups.length > 1
-                      ? `Kirim ${selectedBatchMachines.length} Mesin ke ${selectedToSite} (${siteGroups.length} transfer)`
-                      : `Kirim ${selectedBatchMachines.length} Mesin ke ${selectedToSite} (Kunci In Transit)`}
+                      ? t('xf2_send_multi', { n: selectedBatchMachines.length, site: selectedToSite, count: siteGroups.length })
+                      : t('xf2_send_button', { n: selectedBatchMachines.length, site: selectedToSite })}
                 </span>
               </button>
             </form>
@@ -1458,35 +1468,35 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
           <div className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
             <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
               <Download className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              <span>Terima Mesin di Site {receivingTransfer.toSite}</span>
+              <span>{t('xfer_receive_title', { site: receivingTransfer.toSite })}</span>
             </h3>
 
             <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs space-y-1">
               <div>
-                Kode Aset: <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{receivingTransfer.assetCode}</span>
+                {t('xfer_receive_asset')} <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{receivingTransfer.assetCode}</span>
               </div>
               <div>
-                Dikirim dari: <span className="font-bold text-amber-700 dark:text-amber-400">{receivingTransfer.fromSite}</span>
+                {t('xfer_receive_from')} <span className="font-bold text-amber-700 dark:text-amber-400">{receivingTransfer.fromSite}</span>
               </div>
               {receivingTransfer.senderNote && (
                 <div>
-                  Catatan Pengirim: <span className="italic text-slate-700 dark:text-slate-300">{receivingTransfer.senderNote}</span>
+                  {t('xf2_sender_note')} <span className="italic text-slate-700 dark:text-slate-300">{receivingTransfer.senderNote}</span>
                 </div>
               )}
             </div>
 
             <div>
               <label htmlFor="receive-location-select" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Pilih Lokasi Penempatan di Site {receivingTransfer.toSite} *:
+                {t('xfer_receive_location', { site: receivingTransfer.toSite })}:
               </label>
               <select
                 id="receive-location-select"
                 value={receiveTargetLocationId}
                 onChange={(e) => setReceiveTargetLocationId(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white font-mono focus:border-emerald-500 min-h-[40px]"
-                aria-label="Pilih lokasi penempatan mesin yang diterima"
+                aria-label={t('xf2_receive_loc_aria')}
               >
-                <option value="">-- Pilih Lokasi Tujuan --</option>
+                <option value="">{t('select_dest_placeholder')}</option>
                 {destinationLocations.map((loc) => (
                   <option key={loc.locationId} value={loc.locationId}>
                     {loc.locationId} ({loc.displayName})
@@ -1497,7 +1507,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
 
             <div>
               <label htmlFor="receive-note-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Catatan Penerima (opsional):
+                {t('xf2_receiver_note_label')}
               </label>
               <textarea
                 id="receive-note-input"
@@ -1505,9 +1515,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 onChange={(e) => setReceiveNote(e.target.value)}
                 maxLength={500}
                 rows={2}
-                placeholder="Hasil pemeriksaan saat tiba: kondisi mesin, kerusakan, kekurangan aksesori..."
+                placeholder={t('xf2_receiver_note_ph')}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white focus:border-emerald-500"
-                aria-label="Catatan penerima hasil pemeriksaan mesin"
+                aria-label={t('xf2_receiver_note_aria')}
               />
             </div>
 
@@ -1521,7 +1531,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 disabled={isReceiving}
                 className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 min-h-[40px] cursor-pointer"
               >
-                Batal
+                {t('cancel')}
               </button>
               <button
                 type="button"
@@ -1529,7 +1539,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 disabled={!receiveTargetLocationId || isReceiving}
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold disabled:opacity-50 transition-colors min-h-[40px] cursor-pointer"
               >
-                {isReceiving ? 'Menyimpan di Server...' : 'Konfirmasi Diterima'}
+                {isReceiving ? t('xfer_saving') : t('xfer_confirm_receipt')}
               </button>
             </div>
           </div>
@@ -1541,10 +1551,10 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         isOpen={isCameraScanOpen}
         onClose={() => setIsCameraScanOpen(false)}
         initialMode="camera"
-        captureLabel={`Scan mesin ke transfer (tujuan ${selectedToSite})`}
+        captureLabel={t('xf2_capture_label', { site: selectedToSite })}
         onContinuousScan={handleCameraScan}
         continuousStatus={cameraScanStatus}
-        doneLabel={`Selesai (${selectedBatchMachines.length} mesin di daftar)`}
+        doneLabel={t('xf2_done_label', { n: selectedBatchMachines.length })}
       />
 
       {/* Toast hasil scan: z lebih tinggi dari modal kamera agar tetap terlihat saat kamera terbuka */}

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { Machine, MachineStatus, MachineListFilter } from '../types';
 import { getMachineLabel } from '../utils/machineName';
@@ -40,6 +40,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
   onConsumeInitialFilter,
 }) => {
   const { currentUser, language, canPerformAction, canAccessSite } = useAuth();
+  const t = makeT(language);
   const allMachines = storageService.getAllMachines();
   const sites = storageService.getSites();
 
@@ -79,14 +80,14 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
     try {
       const res = await storageService.syncFromGoogleSheet(undefined, 'machine_asset');
       if (res.success) {
-        setSyncToast(`Sinkronisasi Sukses: ${res.count} mesin dimuat dari Google Sheet (${res.source})!`);
+        setSyncToast(t('ml_sync_ok', { n: res.count, source: res.source }));
         setTimeout(() => setSyncToast(null), 5000);
       } else {
-        setSyncToast(`Gagal: ${res.message}`);
+        setSyncToast(t('ml_sync_fail', { msg: localizeMessage(res.message, language) }));
         setTimeout(() => setSyncToast(null), 7000);
       }
     } catch (e: any) {
-      setSyncToast('Gagal sinkronisasi data: ' + e.message);
+      setSyncToast(t('ml_sync_err', { msg: localizeMessage(e.message, language) }));
       setTimeout(() => setSyncToast(null), 5000);
     } finally {
       setIsSyncing(false);
@@ -213,10 +214,10 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
     setSelectedAssetCodes(next);
 
     const parts: string[] = [];
-    if (added) parts.push(`${added} mesin ditambahkan`);
-    if (already.length) parts.push(`${already.length} sudah terpilih`);
-    if (skipped.length) parts.push(`${skipped.length} dilewati (SOLD / transfer / di luar akses): ${skipped.slice(0, 3).join(', ')}`);
-    if (notFound.length) parts.push(`tidak ditemukan: ${notFound.slice(0, 3).join(', ')}${notFound.length > 3 ? '...' : ''}`);
+    if (added) parts.push(t('ml_notice_added', { n: added }));
+    if (already.length) parts.push(t('ml_notice_already', { n: already.length }));
+    if (skipped.length) parts.push(t('ml_notice_skipped', { n: skipped.length, codes: skipped.slice(0, 3).join(', ') }));
+    if (notFound.length) parts.push(t('ml_notice_notfound', { codes: `${notFound.slice(0, 3).join(', ')}${notFound.length > 3 ? '...' : ''}` }));
     showNotice(parts.join(' · '));
   };
 
@@ -288,7 +289,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
       'Asset Code': m.assetCode,
       'Barcode (12-Digit)': m.barcode,
       'Standard Machine Name': m.standardMachineName,
-      'Nama Lokal': m.localName || '',
+      [t('ml_x_local_name')]: m.localName || '',
       'Item (Korea)': m.item,
       'Manufacturer': m.manufacturer,
       'Model': m.model,
@@ -326,7 +327,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               }}
               onKeyDown={handleSearchKeyDown}
               onPaste={handleSearchPaste}
-              placeholder="Cari / scan kode lalu Enter untuk menandai · tempel banyak kode sekaligus"
+              placeholder={t('ml_search_ph')}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 font-mono transition-colors shadow-xs"
             />
             {searchQuery && (
@@ -351,20 +352,20 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
             <button
               onClick={handleExportExcel}
               className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
-              title="Ekspor daftar ini ke file Excel .xlsx"
+              title={t('ml_export_title')}
             >
               <Download className="w-4 h-4 text-emerald-600" />
-              <span className="hidden md:inline">Ekspor Excel</span>
+              <span className="hidden md:inline">{t('export_excel')}</span>
             </button>
 
             <button
               onClick={handleQuickSyncFromSheet}
               disabled={isSyncing}
               className="px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-transform active:scale-95"
-              title="Tarik data terbaru langsung dari Google Sheet 'machine_asset'"
+              title={t('ml_sync_title')}
             >
               <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span className="hidden lg:inline">{isSyncing ? 'Menarik Data...' : 'Sync Sheet'}</span>
+              <span className="hidden lg:inline">{isSyncing ? t('ml_syncing') : t('ml_sync_btn')}</span>
             </button>
           </div>
         </div>
@@ -380,12 +381,12 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
         {typeFilter && (
           <div className="text-xs">
             <span className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900 font-semibold">
-              Jenis mesin: {typeFilter}
+              {t('ml_type_filter', { type: typeFilter })}
               <button
                 type="button"
                 onClick={() => { setTypeFilter(null); setCurrentPage(1); }}
                 className="w-4 h-4 rounded-full text-slate-400 hover:text-rose-600 hover:bg-rose-50 leading-none cursor-pointer"
-                aria-label="Hapus filter jenis mesin"
+                aria-label={t('ml_type_clear')}
               >
                 ✕
               </button>
@@ -404,7 +405,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
           {/* Site Filter */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
-              Site Pabrik / Gudang:
+              {t('ml_site_label')}
             </label>
             <select
               value={selectedSite}
@@ -415,7 +416,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               }}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500"
             >
-              <option value="ALL">Semua Site (PW1-3, WH2, SW, QA)</option>
+              <option value="ALL">{t('ml_all_sites')}</option>
               {sites.map((s) => (
                 <option key={s.siteId} value={s.siteId}>
                   {s.siteId} - {s.name}
@@ -427,7 +428,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
           {/* Location / Line Filter */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
-              Lokasi / Line:
+              {t('ml_loc_label')}
             </label>
             <select
               value={selectedLocation}
@@ -438,9 +439,9 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                 setCurrentPage(1);
               }}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
-              aria-label="Filter lokasi atau line"
+              aria-label={t('ml_loc_aria')}
             >
-              <option value="ALL">{selectedSite === 'ALL' ? 'Pilih site dulu' : 'Semua Lokasi'}</option>
+              <option value="ALL">{selectedSite === 'ALL' ? t('ml_pick_site') : t('ml_all_locs')}</option>
               {locationOptions.map((l) => (
                 <option key={l.locationId} value={l.locationId}>
                   {l.displayName} ({(locationCounts.get(l.locationId) ?? 0).toLocaleString()})
@@ -452,7 +453,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
           {/* Status Filter */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
-              Status Mesin:
+              {t('ml_status_label')}
             </label>
             <select
               value={selectedStatus}
@@ -462,21 +463,21 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               }}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500"
             >
-              <option value="ALL">Semua Status (Termasuk Sold)</option>
-              <option value="ACTIVE">ACTIVE (Hanya Aktif)</option>
-              <option value="IN_TRANSIT">IN_TRANSIT (Dalam Perjalanan)</option>
-              <option value="IN_REPAIR">IN_REPAIR (Sedang Diperbaiki)</option>
-              <option value="BROKEN">BROKEN (Rusak)</option>
-              <option value="BROKEN_REPAIR">BROKEN + IN_REPAIR (Perbaikan & Rusak)</option>
-              <option value="LOANED">LOANED (Dipinjam)</option>
-              <option value="SOLD">SOLD (Dijual/Afkir)</option>
+              <option value="ALL">{t('ml_st_all')}</option>
+              <option value="ACTIVE">{t('ml_st_active')}</option>
+              <option value="IN_TRANSIT">{t('ml_st_transit')}</option>
+              <option value="IN_REPAIR">{t('mv_status_in_repair')}</option>
+              <option value="BROKEN">{t('mv_status_broken')}</option>
+              <option value="BROKEN_REPAIR">{t('ml_st_broken_repair')}</option>
+              <option value="LOANED">{t('ml_st_loaned')}</option>
+              <option value="SOLD">{t('mv_status_sold')}</option>
             </select>
           </div>
 
           {/* Manufacturer Filter */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
-              Merk / Produsen:
+              {t('ml_mfr_label')}
             </label>
             <select
               value={selectedManufacturer}
@@ -486,7 +487,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               }}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500"
             >
-              <option value="ALL">Semua Merk</option>
+              <option value="ALL">{t('ml_all_mfr')}</option>
               {manufacturers.map((m) => (
                 <option key={m} value={m}>
                   {m}
@@ -510,7 +511,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               }`}
             >
               <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-              <span>Hanya Tanpa Lokasi</span>
+              <span>{t('ml_only_unassigned')}</span>
             </button>
           </div>
         </div>
@@ -521,7 +522,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
         <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 shadow-md flex flex-wrap items-center justify-between gap-3 text-xs animate-in slide-in-from-top-2">
           <div className="flex items-center gap-2 text-emerald-900 font-bold">
             <CheckSquare className="w-4 h-4 text-emerald-600" />
-            <span>{selectedAssetCodes.size} mesin terpilih</span>
+            <span>{t('ml_n_selected', { n: selectedAssetCodes.size })}</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -531,7 +532,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                 className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold flex items-center gap-1 shadow-sm"
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>Pindah Lokasi Batch</span>
+                <span>{t('ml_batch_move')}</span>
               </button>
             )}
 
@@ -541,7 +542,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                 className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-1 shadow-sm"
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
-                <span>Kirim Transfer Antar Site</span>
+                <span>{t('ml_batch_transfer')}</span>
               </button>
             )}
 
@@ -550,7 +551,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                 onClick={handleSelectAllFiltered}
                 className="px-2.5 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold"
               >
-                Pilih semua {filteredMachines.length} hasil
+                {t('ml_select_all', { n: filteredMachines.length })}
               </button>
             )}
 
@@ -558,7 +559,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               onClick={() => setSelectedAssetCodes(new Set())}
               className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold"
             >
-              Batal
+              {t('cancel')}
             </button>
           </div>
 
@@ -572,7 +573,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                 <button
                   onClick={() => toggleSelectOne(m.assetCode)}
                   className="w-4 h-4 rounded-full text-slate-400 hover:text-rose-600 hover:bg-rose-50 leading-none"
-                  aria-label={`Hapus ${m.assetCode} dari pilihan`}
+                  aria-label={t('ml_remove_aria', { code: m.assetCode })}
                 >
                   ✕
                 </button>
@@ -600,20 +601,20 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                     )}
                   </button>
                 </th>
-                <th className="p-3.5">Kode Aset / Barcode</th>
-                <th className="p-3.5">Nama Mesin Standar</th>
-                <th className="p-3.5">Merk & Model</th>
-                <th className="p-3.5">Nomor Seri</th>
-                <th className="p-3.5">Site / Lokasi</th>
-                <th className="p-3.5">Status</th>
-                <th className="p-3.5 text-right">Aksi</th>
+                <th className="p-3.5">{t('xfer_col_asset')}</th>
+                <th className="p-3.5">{t('std_machine_name')}</th>
+                <th className="p-3.5">{t('ml_col_brand')}</th>
+                <th className="p-3.5">{t('ml_col_serial')}</th>
+                <th className="p-3.5">{t('ml_col_site_loc')}</th>
+                <th className="p-3.5">{t('status')}</th>
+                <th className="p-3.5 text-right">{t('actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {currentMachines.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-12 text-center text-slate-400">
-                    Tidak ada mesin yang cocok dengan kriteria pencarian / filter.
+                    {t('ml_empty')}
                   </td>
                 </tr>
               ) : (
@@ -685,7 +686,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                         </div>
                         {m.pendingTransferId && (
                           <div className="text-[10px] text-amber-700 font-semibold mt-0.5">
-                            In Transit ({m.pendingTransferId})
+                            {t('ml_in_transit', { id: m.pendingTransferId })}
                           </div>
                         )}
                       </td>
@@ -709,7 +710,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
                         <button
                           onClick={() => onSelectMachine(m)}
                           className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 transition-colors"
-                          title="Lihat Detail Lengkap"
+                          title={t('ml_view_detail')}
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
@@ -725,14 +726,13 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
         {/* Table Pagination Footer */}
         <div className="p-4 border-t border-slate-200 bg-slate-50/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
           <div>
-            Menampilkan {filteredMachines.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} -{' '}
-            {Math.min(currentPage * pageSize, filteredMachines.length)} dari{' '}
-            <span className="font-bold text-slate-900">{filteredMachines.length.toLocaleString()}</span> mesin
+            {t('ml_showing', { from: filteredMachines.length === 0 ? 0 : (currentPage - 1) * pageSize + 1, to: Math.min(currentPage * pageSize, filteredMachines.length) })}{' '}
+            <span className="font-bold text-slate-900">{filteredMachines.length.toLocaleString()}</span> {t('ml_machines_word')}
           </div>
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
-              <span>Baris per halaman:</span>
+              <span>{t('ml_rows_per_page')}</span>
               <select
                 value={pageSize}
                 onChange={(e) => {

@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
+import { makeT, localizeMessage } from '../services/translations';
 import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
 import { Pagination } from '../components/Pagination';
 import { formatDateTime } from '../utils/dateTime';
@@ -25,7 +26,8 @@ interface HistoryViewProps {
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, language } = useAuth();
+  const t = makeT(language);
   const tableTopRef = useRef<HTMLDivElement | null>(null);
 
   // Filter states
@@ -81,16 +83,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
           }
           setHasMore(Boolean(res.hasMore));
         } else {
-          setErrorMessage(res.message || 'Gagal memuat riwayat pemindahan mesin dari server.');
+          setErrorMessage(res.message ? localizeMessage(res.message, language) : t('hist_load_failed'));
         }
       } catch (err: any) {
-        setErrorMessage(err.message || 'Tidak dapat terhubung ke server.');
+        setErrorMessage(err.message ? localizeMessage(err.message, language) : t('dash_no_connect'));
       } finally {
         setIsLoading(false);
         setIsLoadingMore(false);
       }
     },
-    [selectedSite, fromDate, toDate]
+    [selectedSite, fromDate, toDate, language]
   );
 
   // Initial load on mount or tab focus
@@ -171,20 +173,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
     if (filteredMovements.length === 0) return;
 
     const headers = [
-      'Waktu',
-      'Kode Aset',
-      'Barcode',
-      'Nama Mesin',
-      'Nomor Seri',
-      'Dari Lokasi',
-      'Ke Lokasi',
-      'Dari Site',
-      'Ke Site',
-      'Status',
-      'Alasan',
-      'Oleh',
-      'Status Undo',
-      'Catatan',
+      t('col_time'),
+      t('asset_code'),
+      t('hist2_csv_barcode'),
+      t('xfer_col_name'),
+      t('hist2_csv_serial'),
+      t('hist2_csv_from_loc'),
+      t('hist2_csv_to_loc'),
+      t('hist2_csv_from_site'),
+      t('hist2_csv_to_site'),
+      t('status'),
+      t('hist2_csv_reason'),
+      t('col_by'),
+      t('hist2_csv_undo_status'),
+      t('notes'),
     ];
 
     const rows = filteredMovements.map((m) => [
@@ -200,7 +202,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
       `"${(m.status || '').replace(/"/g, '""')}"`,
       `"${(m.reason || '').replace(/"/g, '""')}"`,
       `"${(m.movedBy || '').replace(/"/g, '""')}"`,
-      `"${m.isUndone ? 'Dibatalkan' : 'Aktif'}"`,
+      `"${m.isUndone ? t('hist_undone') : t('hist2_csv_active')}"`,
       `"${(m.notes || '').replace(/"/g, '""')}"`,
     ]);
 
@@ -231,10 +233,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             </div>
             <div>
               <h1 className="text-xl font-black text-slate-900 dark:text-white">
-                Riwayat Mesin
+                {t('hist_title')}
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Log riwayat mutasi dan pergerakan lokasi mesin langsung dari server GAS
+                {t('hist2_subtitle')}
               </p>
             </div>
           </div>
@@ -246,10 +248,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             onClick={() => fetchMovementsData(currentLimit, false)}
             disabled={isLoading}
             className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
-            title="Muat Ulang Data Server"
+            title={t('hist_reload_title')}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>Segarkan</span>
+            <span>{t('refresh')}</span>
           </button>
 
           <button
@@ -257,10 +259,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             onClick={handleExportCsv}
             disabled={filteredMovements.length === 0}
             className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Ekspor Data ke File CSV"
+            title={t('hist_export_title')}
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Ekspor CSV</span>
+            <span>{t('export_csv')}</span>
           </button>
         </div>
       </div>
@@ -272,7 +274,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             {/* Search Box */}
             <div>
               <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Pencarian (Kode / Barcode / Serial):
+                {t('hist_search_label')}
               </label>
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -283,7 +285,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                     setSearchQuery(e.target.value);
                     setCurrentPage(1);
                   }}
-                  placeholder="Contoh: 000000066145 / DDL"
+                  placeholder={t('hist_search_ph')}
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white font-mono focus:border-indigo-500 focus:outline-none"
                 />
               </div>
@@ -292,7 +294,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             {/* Site Selector */}
             <div>
               <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Filter Site Pabrik / Gudang:
+                {t('hist_site_filter')}
               </label>
               <div className="relative">
                 <Building2 className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -304,10 +306,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                   }}
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white font-bold focus:border-indigo-500 focus:outline-none"
                 >
-                  <option value="ALL">Semua Site Terjangkau</option>
+                  <option value="ALL">{t('hist_all_sites')}</option>
                   {accessibleSites.map((s) => (
                     <option key={s} value={s}>
-                      Site {s}
+                      {t('hist2_site_opt', { s })}
                     </option>
                   ))}
                 </select>
@@ -317,7 +319,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             {/* Dari Tanggal */}
             <div>
               <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Dari Tanggal:
+                {t('hist_from_date')}
               </label>
               <div className="relative">
                 <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -336,7 +338,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             {/* Sampai Tanggal */}
             <div>
               <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Sampai Tanggal:
+                {t('hist_to_date')}
               </label>
               <div className="relative">
                 <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -356,7 +358,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
           {/* Action Buttons */}
           <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
             <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              Menampilkan {filteredMovements.length} baris riwayat
+              {t('hist2_showing', { n: filteredMovements.length })}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -365,14 +367,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                 className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
-                <span>Reset</span>
+                <span>{t('reset')}</span>
               </button>
               <button
                 type="submit"
                 className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
               >
                 <Filter className="w-3 h-3" />
-                <span>Terapkan</span>
+                <span>{t('apply')}</span>
               </button>
             </div>
           </div>
@@ -391,7 +393,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             onClick={() => fetchMovementsData(currentLimit, false)}
             className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer shrink-0"
           >
-            Coba Lagi
+            {t('retry')}
           </button>
         </div>
       )}
@@ -416,17 +418,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
             <History className="w-7 h-7" />
           </div>
           <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-            Belum ada riwayat untuk site Anda
+            {t('hist_empty_title')}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
-            Tidak ada catatan pergerakan mesin yang cocok dengan kriteria filter yang dipilih.
+            {t('hist_empty_desc')}
           </p>
           <button
             type="button"
             onClick={handleResetFilter}
             className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
           >
-            Bersihkan Filter
+            {t('clear_filters')}
           </button>
         </div>
       ) : (
@@ -438,12 +440,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-50/80 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px] font-mono">
-                    <th className="py-3 px-4">Waktu</th>
-                    <th className="py-3 px-4">Mesin</th>
-                    <th className="py-3 px-4">Dari → Ke (Lokasi)</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                    <th className="py-3 px-4">Alasan &amp; Catatan</th>
-                    <th className="py-3 px-4">Oleh</th>
+                    <th className="py-3 px-4">{t('col_time')}</th>
+                    <th className="py-3 px-4">{t('col_machine')}</th>
+                    <th className="py-3 px-4">{t('hist_col_from_to')}</th>
+                    <th className="py-3 px-4 text-center">{t('status')}</th>
+                    <th className="py-3 px-4">{t('hist2_reason_notes')}</th>
+                    <th className="py-3 px-4">{t('col_by')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -460,11 +462,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                           className="font-mono text-slate-900 dark:text-slate-100 font-semibold"
                           title={m.timestamp}
                         >
-                          {formatDateTime(m.timestamp, { seconds: true })}
+                          {formatDateTime(m.timestamp, { seconds: true, lang: language })}
                         </div>
                         {m.isUndone && (
                           <span className="inline-block mt-1 text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900">
-                            Dibatalkan (Undo)
+                            {t('hist_undone_badge')}
                           </span>
                         )}
                       </td>
@@ -480,7 +482,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                           {m.assetCode || 'N/A'}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-xs">
-                          {m.machineName || 'Mesin Jahit'}
+                          {m.machineName || t('hist2_machine_fallback')}
                         </div>
                         {(m.barcode || m.serial) && (
                           <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
@@ -526,7 +528,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
 
                       {/* Alasan & Catatan */}
                       <td className="py-3.5 px-4 align-top text-xs text-slate-700 dark:text-slate-300 max-w-xs">
-                        <div className="font-medium">{m.reason || '-'}</div>
+                        <div className="font-medium">{m.reason ? localizeMessage(m.reason, language) : '-'}</div>
                         {m.notes && (
                           <div className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5">
                             {m.notes}
@@ -538,7 +540,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                       <td className="py-3.5 px-4 align-top whitespace-nowrap">
                         <div className="font-bold text-slate-800 dark:text-slate-200 text-[11px] flex items-center gap-1">
                           <User className="w-3 h-3 text-slate-400" />
-                          <span>{m.movedBy || 'Sistem'}</span>
+                          <span>{m.movedBy || t('hist2_system')}</span>
                         </div>
                       </td>
                     </tr>
@@ -560,11 +562,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                 <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
                   <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
                     <Clock className="w-3 h-3" />
-                    <span title={m.timestamp}>{formatDateTime(m.timestamp, { seconds: true })}</span>
+                    <span title={m.timestamp}>{formatDateTime(m.timestamp, { seconds: true, lang: language })}</span>
                   </div>
                   {m.isUndone ? (
                     <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 border border-rose-200">
-                      Dibatalkan
+                      {t('hist_undone')}
                     </span>
                   ) : (
                     <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -583,7 +585,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
                     {m.assetCode || 'N/A'}
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-300">
-                    {m.machineName || 'Mesin Jahit'}
+                    {m.machineName || t('hist2_machine_fallback')}
                   </div>
                   {(m.barcode || m.serial) && (
                     <div className="text-[10px] font-mono text-slate-400">
@@ -606,13 +608,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onSelectMachine }) => 
 
                 {m.reason && (
                   <p className="text-xs text-slate-600 dark:text-slate-300 italic">
-                    Alasan: {m.reason}
+                    {t('hist2_reason_label')} {localizeMessage(m.reason, language)}
                   </p>
                 )}
 
                 <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between pt-1">
                   <span>
-                    Oleh: <strong className="text-slate-800 dark:text-slate-200">{m.movedBy || 'Sistem'}</strong>
+                    {t('hist_by')} <strong className="text-slate-800 dark:text-slate-200">{m.movedBy || t('hist2_system')}</strong>
                   </span>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { FileText, Mail, Clock } from 'lucide-react';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT } from '../services/translations';
 import { useAuth } from '../services/authContext';
 
 /**
@@ -12,6 +12,7 @@ import { useAuth } from '../services/authContext';
  */
 export const ReportsView: React.FC = () => {
   const { language } = useAuth();
+  const t = makeT(language);
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in">
@@ -31,17 +32,16 @@ export const ReportsView: React.FC = () => {
           <Clock className="w-7 h-7" />
         </div>
         <div>
-          <h2 className="text-base font-bold text-slate-900">Laporan Harian belum tersedia</h2>
+          <h2 className="text-base font-bold text-slate-900">{t('rep_unavailable_title')}</h2>
           <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
-            Fitur rekapitulasi dan pengiriman email otomatis sedang dikembangkan untuk versi Supabase.
-            Sementara ini, riwayat mutasi dan status mesin bisa dilihat lewat menu{' '}
-            <span className="font-semibold text-slate-700">Riwayat Mesin</span> dan{' '}
-            <span className="font-semibold text-slate-700">Dashboard</span>.
+            {t('rep_body_pre')}{' '}
+            <span className="font-semibold text-slate-700">{t('hist_title')}</span> {t('rep_and')}{' '}
+            <span className="font-semibold text-slate-700">{getTranslation('dashboard', language)}</span>{t('rep_menu_suffix') ? ` ${t('rep_menu_suffix')}` : ''}.
           </p>
         </div>
         <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 pt-2">
           <Mail className="w-3.5 h-3.5" />
-          <span>Penerima email & jadwal pengiriman akan dikonfigurasi di sini setelah fitur ini siap.</span>
+          <span>{t('rep_email_note')}</span>
         </div>
       </div>
     </div>

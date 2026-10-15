@@ -1,5 +1,12 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw, Plus } from 'lucide-react';
+import { useAuth } from '../services/authContext';
+import { makeT } from '../services/translations';
+
+const ITEM_LABEL_KEYS: Record<string, string> = {
+  riwayat: 'shell_pg_item_history',
+  mutasi: 'shell_pg_item_movement',
+};
 
 export interface PaginationProps {
   currentPage: number;
@@ -24,6 +31,8 @@ export const Pagination: React.FC<PaginationProps> = ({
   isLoadingMore = false,
   className = '',
 }) => {
+  const { language } = useAuth();
+  const t = makeT(language);
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
   if (totalItems <= 0) return null;
@@ -54,16 +63,16 @@ export const Pagination: React.FC<PaginationProps> = ({
   return (
     <div
       className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-slate-200/80 dark:border-slate-800 text-xs ${className}`}
-      aria-label="Paginasi navigasi"
+      aria-label={t('shell_pg_aria')}
     >
       {/* Summary Info */}
       <div className="text-slate-600 dark:text-slate-400 font-mono text-[11px] sm:text-xs">
-        Menampilkan <span className="font-bold text-slate-900 dark:text-white">{startItem}-{endItem}</span> dari{' '}
+        {t('shell_pg_showing')} <span className="font-bold text-slate-900 dark:text-white">{startItem}-{endItem}</span> {t('shell_pg_of')}{' '}
         <span className="font-bold text-slate-900 dark:text-white">
           {totalItems}
           {hasMore ? '+' : ''}
         </span>{' '}
-        {itemLabel}
+        {ITEM_LABEL_KEYS[itemLabel] ? t(ITEM_LABEL_KEYS[itemLabel]) : itemLabel}
       </div>
 
       {/* Controls Container */}
@@ -75,34 +84,34 @@ export const Pagination: React.FC<PaginationProps> = ({
             onClick={onLoadMore}
             disabled={isLoadingMore}
             className="min-h-[40px] px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 text-xs shadow-2xs"
-            title="Tarik data tambahan dari server"
+            title={t('shell_pg_pull_title')}
           >
             {isLoadingMore ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Memuat...</span>
+                <span>{t('shell_pg_loading')}</span>
               </>
             ) : (
               <>
                 <Plus className="w-3.5 h-3.5" />
-                <span>Muat Lebih Banyak</span>
+                <span>{t('shell_pg_load_more')}</span>
               </>
             )}
           </button>
         )}
 
         {/* Page Nav Buttons */}
-        <nav aria-label="Navigasi Halaman" className="flex items-center gap-1">
+        <nav aria-label={t('shell_pg_nav_aria')} className="flex items-center gap-1">
           {/* Tombol Sebelumnya */}
           <button
             type="button"
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage <= 1}
-            aria-label="Halaman sebelumnya"
+            aria-label={t('shell_pg_prev_aria')}
             className="min-w-[40px] min-h-[40px] px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0f1b2d] text-slate-700 dark:text-slate-200 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
-            <span className="hidden md:inline">Sebelumnya</span>
+            <span className="hidden md:inline">{t('previous')}</span>
           </button>
 
           {/* Nomor-nomor Halaman */}
@@ -127,7 +136,7 @@ export const Pagination: React.FC<PaginationProps> = ({
                   key={`page-${pageNum}`}
                   type="button"
                   onClick={() => onPageChange(pageNum)}
-                  aria-label={`Ke halaman ${pageNum}`}
+                  aria-label={t('shell_pg_goto', { n: pageNum })}
                   aria-current={isActive ? 'page' : undefined}
                   className={`min-w-[40px] min-h-[40px] px-2 py-1 rounded-xl text-xs font-mono font-bold transition-all flex items-center justify-center shadow-2xs cursor-pointer ${
                     isActive
@@ -146,10 +155,10 @@ export const Pagination: React.FC<PaginationProps> = ({
             type="button"
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage >= totalPages}
-            aria-label="Halaman berikutnya"
+            aria-label={t('shell_pg_next_aria')}
             className="min-w-[40px] min-h-[40px] px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0f1b2d] text-slate-700 dark:text-slate-200 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs cursor-pointer"
           >
-            <span className="hidden md:inline">Berikutnya</span>
+            <span className="hidden md:inline">{t('next')}</span>
             <ChevronRight className="w-4 h-4" />
           </button>
         </nav>

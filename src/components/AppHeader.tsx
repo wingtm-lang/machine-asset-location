@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../services/authContext';
+import { makeT } from '../services/translations';
 import {
   Menu,
   QrCode,
@@ -26,22 +27,23 @@ interface AppHeaderProps {
   isSyncing?: boolean;
   onOpenMobileSidebar: () => void;
   onOpenScanner: () => void;
+  onOpenBenchmark?: () => void;
   onOpenChangePassword: () => void;
   onOpenLogout?: () => void;
 }
 
 const TAB_TITLES: Record<string, { title: string; subtitle: string; icon: any }> = {
-  home: { title: 'Beranda', subtitle: 'Ringkasan Sistem & Modul Asset', icon: LayoutGrid },
-  dashboard: { title: 'Dashboard Asset', subtitle: 'Metrik & Distribusi Mesin Pabrik', icon: LayoutDashboard },
-  machines: { title: 'Data Mesin', subtitle: 'Inventaris Mesin Jahit', icon: Boxes },
-  rackmap: { title: 'WH2 Rack Map', subtitle: 'Denah Visual Rak R1–R6 Warehouse 2', icon: Grid },
-  move: { title: 'Pindahkan Lokasi', subtitle: 'Mutasi Posisi Line & Rak', icon: Layers },
-  transfers: { title: 'Transfer Antar Site', subtitle: 'Kirim & Terima Antar Pabrik', icon: ArrowRightLeft },
-  opname: { title: 'Weekly Machine List', subtitle: 'Rekonsiliasi Fisik Mesin', icon: ClipboardCheck },
-  history: { title: 'Riwayat Mesin', subtitle: 'Log Riwayat Pemindahan Mesin dari Server', icon: History },
-  reports: { title: 'Laporan Harian', subtitle: 'Rekapitulasi Harian & Pengaturan Notifikasi Email', icon: FileText },
-  users: { title: 'Kelola Pengguna', subtitle: 'Manajemen Akun & Otoritas', icon: Users },
-  admin: { title: 'Admin & Integrasi GAS', subtitle: 'Sinkronisasi Backend Google Sheet', icon: ShieldAlert },
+  home: { title: 'home', subtitle: 'shell_hdr_home_sub', icon: LayoutGrid },
+  dashboard: { title: 'shell_hdr_dashboard', subtitle: 'shell_hdr_dashboard_sub', icon: LayoutDashboard },
+  machines: { title: 'shell_hdr_machines', subtitle: 'shell_hdr_machines_sub', icon: Boxes },
+  rackmap: { title: 'shell_hdr_rackmap', subtitle: 'shell_hdr_rackmap_sub', icon: Grid },
+  move: { title: 'shell_hdr_move', subtitle: 'shell_hdr_move_sub', icon: Layers },
+  transfers: { title: 'transfers', subtitle: 'shell_hdr_transfers_sub', icon: ArrowRightLeft },
+  opname: { title: 'shell_hdr_opname', subtitle: 'shell_hdr_opname_sub', icon: ClipboardCheck },
+  history: { title: 'hist_title', subtitle: 'shell_hdr_history_sub', icon: History },
+  reports: { title: 'reports', subtitle: 'shell_hdr_reports_sub', icon: FileText },
+  users: { title: 'shell_hdr_users', subtitle: 'shell_hdr_users_sub', icon: Users },
+  admin: { title: 'shell_hdr_admin', subtitle: 'shell_hdr_admin_sub', icon: ShieldAlert },
 };
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -52,14 +54,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onOpenChangePassword,
   onOpenLogout,
 }) => {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, language } = useAuth();
+  const t = makeT(language);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
-  const currentInfo = TAB_TITLES[activeTab] || {
-    title: 'Machine Asset Management',
-    subtitle: 'PT. WINNERS INTERNATIONAL',
-    icon: Building2,
-  };
+  const rawInfo = TAB_TITLES[activeTab];
+  const currentInfo = rawInfo
+    ? { ...rawInfo, title: t(rawInfo.title), subtitle: t(rawInfo.subtitle) }
+    : {
+        title: 'Machine Asset Management',
+        subtitle: 'PT. WINNERS INTERNATIONAL',
+        icon: Building2,
+      };
   const CurrentIcon = currentInfo.icon;
 
   const handleLogout = () => {
@@ -80,8 +86,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             type="button"
             onClick={onOpenMobileSidebar}
             className="md:hidden p-2 rounded-xl border border-[#2b5993]/80 bg-[#103561]/80 hover:bg-[#164883] text-[#cfe6ff] transition-colors cursor-pointer shrink-0"
-            title="Buka Menu Navigasi Sidebar"
-            aria-label="Buka Menu Navigasi Sidebar"
+            title={t('shell_hdr_open_menu')}
+            aria-label={t('shell_hdr_open_menu')}
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -108,7 +114,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           {isSyncing && (
             <div
               className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl bg-[#ffd23f]/15 border border-[#ffd23f]/35 text-[#ffd23f] text-xs font-mono font-semibold animate-pulse"
-              title="Sedang menyinkronkan data mesin dari server..."
+              title={t('shell_hdr_syncing_title')}
             >
               <Loader2 className="w-3.5 h-3.5 animate-spin text-[#ffd23f]" />
               <span className="hidden md:inline text-[11px]">Syncing...</span>
@@ -120,7 +126,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             type="button"
             onClick={onOpenScanner}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#ffd23f] to-[#f59e0b] hover:from-[#ffe066] hover:to-[#fbbf24] text-[#0c2e57] text-xs font-black shadow-xs transition-all active:scale-95 cursor-pointer"
-            title="Pindai QR / Barcode Mesin"
+            title={t('shell_hdr_scan_title')}
           >
             <QrCode className="w-3.5 h-3.5 stroke-[2.5]" />
             <span className="hidden sm:inline">Scan</span>
@@ -167,7 +173,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-[#cfe6ff] hover:text-white hover:bg-white/10 cursor-pointer text-left transition-colors"
                 >
                   <KeyRound className="w-3.5 h-3.5 text-[#ffd23f]" />
-                  <span>Ubah Password</span>
+                  <span>{t('change_password')}</span>
                 </button>
 
                 <button
@@ -179,7 +185,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-rose-300 hover:text-rose-100 hover:bg-rose-950/50 cursor-pointer text-left transition-colors"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Keluar dari Sistem</span>
+                  <span>{t('logout_system')}</span>
                 </button>
               </div>
             )}

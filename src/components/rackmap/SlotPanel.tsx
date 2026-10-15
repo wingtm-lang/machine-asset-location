@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../../services/authContext';
+import { makeT, localizeMessage } from '../../services/translations';
 import {
   RackConfig,
   RackSlotItem,
@@ -52,6 +54,8 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
   onRequestScan,
   scanInput,
 }) => {
+  const { language } = useAuth();
+  const t = makeT(language);
   const positionCode = `${rack.id}-${coord.level}${coord.column}`;
 
   // Slot states (1, 2, 3)
@@ -106,7 +110,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
   const handleSearch = async (slotNumber: number, override?: string) => {
     const query = (override ?? searchQueries[slotNumber] ?? '').trim();
     if (!query) {
-      notify('warning', 'Ketik kode aset, barcode, atau serial mesin.');
+      notify('warning', t('sp_warn_empty_query'));
       return;
     }
 
@@ -119,10 +123,10 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
         setSearchResults((prev) => ({ ...prev, [slotNumber]: res.machine! }));
       } else {
         setSearchResults((prev) => ({ ...prev, [slotNumber]: null }));
-        notify('error', res.message || `Mesin "${query}" tidak ditemukan.`);
+        notify('error', res.message ? localizeMessage(res.message, language) : t('sp_not_found', { query }));
       }
     } catch (err: any) {
-      notify('error', err.message || 'Gagal mencari mesin.');
+      notify('error', localizeMessage(err.message, language) || t('sp_err_search'));
     } finally {
       setSearchingSlot(null);
     }
@@ -146,7 +150,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
     if (machine.status !== 'ACTIVE') {
       notify(
         'error',
-        `Mesin ${machine.assetCode} berstatus "${machine.status}". Hanya mesin ACTIVE yang dapat ditempatkan di rak.`
+        t('sp_err_not_active', { code: machine.assetCode, status: machine.status })
       );
       return;
     }
@@ -159,7 +163,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
     if (!isWh2) {
       notify(
         'error',
-        `Mesin ${machine.assetCode} terdaftar di site ${site || 'Luar'} (${loc}). Fitur ini khusus site WH2.`
+        t('sp_err_not_wh2', { code: machine.assetCode, site: site || t('sp_site_outside'), loc })
       );
       return;
     }
@@ -188,7 +192,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
       });
 
       if (res.success) {
-        notify('success', res.message || `Mesin ${machine.assetCode} berhasil ditempatkan di Slot ${slotNumber}.`);
+        notify('success', res.message ? localizeMessage(res.message, language) : t('sp_ok_assigned', { code: machine.assetCode, slot: slotNumber }));
         setLastAssignedAsset({ slot: slotNumber, assetCode: machine.assetCode });
         // Clear search input and result
         setSearchQueries((prev) => ({ ...prev, [slotNumber]: '' }));
@@ -196,10 +200,10 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
         // Refresh rack data
         await onRefresh();
       } else {
-        notify('error', res.message || 'Gagal menempatkan mesin ke slot rak.');
+        notify('error', res.message ? localizeMessage(res.message, language) : t('sp_err_assign'));
       }
     } catch (err: any) {
-      notify('error', err.message || 'Terjadi kesalahan sistem.');
+      notify('error', localizeMessage(err.message, language) || t('sp_err_system'));
     } finally {
       setLoadingActionSlot(null);
     }
@@ -215,14 +219,14 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
     try {
       const res = await rackMapService.removeMachineFromRack(item.assetCode, byUser || 'User');
       if (res.success) {
-        notify('success', res.message || `Mesin ${item.assetCode} berhasil dikeluarkan dari rak.`);
+        notify('success', res.message ? localizeMessage(res.message, language) : t('sp_ok_removed', { code: item.assetCode }));
         setLastAssignedAsset(null);
         await onRefresh();
       } else {
-        notify('error', res.message || 'Gagal mengeluarkan mesin.');
+        notify('error', res.message ? localizeMessage(res.message, language) : t('sp_err_remove'));
       }
     } catch (err: any) {
-      notify('error', err.message || 'Terjadi kesalahan saat memproses.');
+      notify('error', localizeMessage(err.message, language) || t('sp_err_processing'));
     } finally {
       setLoadingActionSlot(null);
     }
@@ -236,14 +240,14 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
     try {
       const res = await rackMapService.undoMove(assetCode, byUser || 'User');
       if (res.success) {
-        notify('success', res.message || `Penempatan mesin ${assetCode} berhasil dibatalkan.`);
+        notify('success', res.message ? localizeMessage(res.message, language) : t('sp_ok_undone', { code: assetCode }));
         setLastAssignedAsset(null);
         await onRefresh();
       } else {
-        notify('error', res.message || 'Gagal membatalkan penempatan.');
+        notify('error', res.message ? localizeMessage(res.message, language) : t('sp_err_undo'));
       }
     } catch (err: any) {
-      notify('error', err.message || 'Gagal melakukan undo.');
+      notify('error', localizeMessage(err.message, language) || t('sp_err_undo2'));
     } finally {
       setLoadingActionSlot(null);
     }
@@ -267,8 +271,8 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
           type="button"
           onClick={onClose}
           className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          title="Tutup panel"
-          aria-label="Tutup panel slot"
+          title={t('sp_close_title')}
+          aria-label={t('sp_close_aria')}
         >
           <X className="w-4 h-4" />
         </button>
@@ -333,7 +337,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                       : 'text-slate-400 dark:text-slate-500 bg-slate-200/60 dark:bg-slate-800'
                   }`}
                 >
-                  {filledItem ? 'Terisi' : 'Kosong'}
+                  {filledItem ? t('sp_filled') : t('sp_empty')}
                 </span>
               </div>
 
@@ -345,7 +349,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                       {filledItem.assetCode}
                     </div>
                     <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      {filledItem.localName || filledItem.name || 'Mesin Jahit'}
+                      {filledItem.localName || filledItem.name || t('sp_default_name')}
                       {filledItem.serial ? ` · ${filledItem.serial}` : ''}
                     </div>
                   </div>
@@ -355,8 +359,8 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                     disabled={isGlobalLoading}
                     onClick={() => handleRemove(slotNumber, filledItem)}
                     className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors disabled:opacity-40 shrink-0"
-                    title="Keluarkan dari rak"
-                    aria-label={`Keluarkan mesin dari Slot ${slotNumber}`}
+                    title={t('sp_remove_title')}
+                    aria-label={t('sp_remove_aria', { slot: slotNumber })}
                   >
                     {isSlotBusy ? (
                       <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
@@ -374,7 +378,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                       <input
                         type="text"
                         disabled={isGlobalLoading}
-                        placeholder="Kode aset / barcode / serial"
+                        placeholder={t('sp_search_ph')}
                         value={queryVal}
                         onChange={(e) =>
                           setSearchQueries((prev) => ({ ...prev, [slotNumber]: e.target.value }))
@@ -392,12 +396,12 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                       disabled={isGlobalLoading || !queryVal.trim()}
                       onClick={() => handleSearch(slotNumber)}
                       className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white flex items-center gap-1 shadow-2xs transition-colors shrink-0"
-                      title="Cari mesin"
+                      title={t('sp_search_title')}
                     >
                       {isSearchingThis ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
-                        <span>Cari</span>
+                        <span>{t('sp_search_btn')}</span>
                       )}
                     </button>
                     {(onRequestScan || onOpenScanner) && (
@@ -406,7 +410,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                         disabled={isGlobalLoading}
                         onClick={() => (onRequestScan ? onRequestScan(slotNumber) : onOpenScanner?.())}
                         className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
-                        title="Scan barcode"
+                        title={t('sp_scan_title')}
                       >
                         <QrCode className="w-3.5 h-3.5" />
                       </button>
@@ -426,7 +430,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                          {searchResult.localName || searchResult.standardMachineName || 'Mesin'} {searchResult.model ? `· ${searchResult.model}` : ''}
+                          {searchResult.localName || searchResult.standardMachineName || t('sp_machine')} {searchResult.model ? `· ${searchResult.model}` : ''}
                         </div>
                       </div>
 
@@ -442,7 +446,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                           ) : (
                             <Package className="w-3.5 h-3.5" />
                           )}
-                          <span>Tempatkan</span>
+                          <span>{t('sp_place')}</span>
                         </button>
                         <button
                           type="button"
@@ -451,7 +455,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
                             setSearchResults((prev) => ({ ...prev, [slotNumber]: null }))
                           }
                           className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                          title="Batal"
+                          title={t('cancel')}
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -469,7 +473,7 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
       {lastAssignedAsset && (
         <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
           <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-            Baru saja menempatkan <b className="text-slate-700 dark:text-slate-200">{lastAssignedAsset.assetCode}</b>
+            {t('sp_just_placed')} <b className="text-slate-700 dark:text-slate-200">{lastAssignedAsset.assetCode}</b>
           </div>
           <button
             type="button"

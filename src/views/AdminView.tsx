@@ -20,13 +20,14 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
-import { getTranslation } from '../services/translations';
+import { getTranslation, makeT, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { gasAuthService, getGasBaseUrl } from '../services/gasAuthService';
 import { Site, Location, Rack, User, UserRole, AppSettings } from '../types';
 
 export const AdminView: React.FC = () => {
   const { currentUser, language } = useAuth();
+  const t = makeT(language);
 
   const [activeSection, setActiveSection] = useState<
     'cleaning' | 'sites' | 'racks' | 'users' | 'import_export'
@@ -85,12 +86,12 @@ export const AdminView: React.FC = () => {
       const res = await storageService.syncFromGoogleSheet(spreadsheetId, targetSheetName);
       setSyncFeedback(res);
       if (res.success) {
-        setNotification(`Sinkronisasi berhasil! ${res.count} data mesin dimuat dari "${targetSheetName}".`);
+        setNotification(t('adm_sync_ok', { count: res.count ?? '', sheet: targetSheetName }));
       }
     } catch (e: any) {
       setSyncFeedback({
         success: false,
-        message: 'Terjadi kendala saat menghubungkan ke Google Spreadsheet: ' + e.message,
+        message: t('adm_sync_err') + e.message,
       });
     } finally {
       setIsSyncingSheet(false);
@@ -99,9 +100,9 @@ export const AdminView: React.FC = () => {
 
   // Clear Database & Dummy Records
   const handleClearDatabase = () => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus seluruh data mesin dummy / lokal? Database akan dikosongkan untuk kemudian ditarik dari Google Spreadsheet.')) {
+    if (window.confirm(t('adm_clear_confirm'))) {
       storageService.clearAllData(true);
-      setNotification('Seluruh data mesin lokal / dummy telah berhasil dihapus. Database sekarang bersih (0 mesin).');
+      setNotification(t('adm_clear_done'));
     }
   };
 
@@ -109,7 +110,7 @@ export const AdminView: React.FC = () => {
   const handleTestGasConnection = async () => {
     setTestingConnection(true);
     setConnectionStatus('IDLE');
-    setConnectionMsg('Menguji konektivitas server Google Apps Script (PING)...');
+    setConnectionMsg(t('adm_ping_testing'));
 
     try {
       // Save spreadsheet ID to local settings
@@ -122,17 +123,17 @@ export const AdminView: React.FC = () => {
       if (res && res.success) {
         setConnectionStatus('SUCCESS');
         setConnectionMsg(
-          `Koneksi Berhasil! Version: ${res.version || 'v1.0'}${
-            res.timestamp ? ` (Waktu Server: ${res.timestamp})` : ''
-          }`
+          res.timestamp
+            ? t('adm_conn_ok_time', { version: res.version || 'v1.0', time: res.timestamp })
+            : t('adm_conn_ok', { version: res.version || 'v1.0' })
         );
       } else {
         setConnectionStatus('ERROR');
-        setConnectionMsg(res?.message || 'Server Google Apps Script tidak merespons PING.');
+        setConnectionMsg(res?.message ? localizeMessage(res.message, language) : t('adm_ping_noresp'));
       }
     } catch (err: any) {
       setConnectionStatus('ERROR');
-      setConnectionMsg(`Gagal terhubung ke server: ${err.message || 'Error jaringan'}`);
+      setConnectionMsg(t('adm_conn_fail', { error: err.message ? localizeMessage(err.message, language) : t('adm_net_error') }));
     } finally {
       setTestingConnection(false);
     }
@@ -144,11 +145,9 @@ export const AdminView: React.FC = () => {
     setAuditResult(res);
     const totalFixed = Object.values(res).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
     if (totalFixed > 0) {
-      setNotification('Audit dan perbaikan data Bagian C berhasil dieksekusi ke seluruh database mesin!');
+      setNotification(t('adm_audit_done'));
     } else {
-      setNotification(
-        'Audit otomatis di aplikasi belum tersedia di versi Supabase (constraint database sudah mencegah data rusak). Tidak ada yang diperbaiki.'
-      );
+      setNotification(t('adm_audit_none'));
     }
   };
 
@@ -156,7 +155,7 @@ export const AdminView: React.FC = () => {
   const handleAddSite = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSiteId.trim() || !newSiteName.trim()) {
-      setNotification('Isi dulu Kode Site dan Nama Site sebelum menyimpan.');
+      setNotification(t('adm_site_required'));
       return;
     }
 
@@ -167,7 +166,7 @@ export const AdminView: React.FC = () => {
       active: true,
     });
 
-    setNotification(res.message);
+    setNotification(localizeMessage(res.message, language));
     if (res.success) {
       setNewSiteId('');
       setNewSiteName('');
@@ -177,7 +176,7 @@ export const AdminView: React.FC = () => {
   // Update Rack Columns
   const handleUpdateRack = (rackNo: number, cols: number) => {
     const res = storageService.updateRackConfig(rackNo, cols);
-    setNotification(res.message);
+    setNotification(localizeMessage(res.message, language));
   };
 
   // Add User
@@ -201,7 +200,7 @@ export const AdminView: React.FC = () => {
       mustChangePassword: true,
     });
 
-    setNotification(res.message);
+    setNotification(localizeMessage(res.message, language));
     if (res.success) {
       setNewUsername('');
       setNewDisplayName('');
@@ -211,7 +210,7 @@ export const AdminView: React.FC = () => {
   // Unlock User
   const handleUnlock = (username: string) => {
     const res = storageService.unlockUser(username);
-    setNotification(res.message);
+    setNotification(localizeMessage(res.message, language));
   };
 
   // Export Full DB
@@ -232,11 +231,11 @@ export const AdminView: React.FC = () => {
             <ShieldAlert className="w-4 h-4" />
           </div>
           <h1 className="text-lg sm:text-xl font-black text-slate-900">
-            {getTranslation('admin', language)} & Panel Kontrol
+            {t('adm_title', { admin: getTranslation('admin', language) })}
           </h1>
         </div>
         <p className="text-xs text-slate-500">
-          Kelola master data site, line pabrik, rak WH2, pengguna & hak akses RBAC, audit data Bagian C, dan generator Apps Script.
+          {t('adm_subtitle')}
         </p>
       </div>
 
@@ -249,7 +248,7 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <Wrench className="w-3.5 h-3.5 inline mr-1.5" />
-          <span>Audit & Pembersihan Data (Bagian C)</span>
+          <span>{t('adm_tab_cleaning')}</span>
         </button>
 
         <button
@@ -259,7 +258,7 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <Building className="w-3.5 h-3.5 inline mr-1.5" />
-          <span>Site & Line Pabrik</span>
+          <span>{t('adm_tab_sites')}</span>
         </button>
 
         <button
@@ -269,7 +268,7 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <Layers className="w-3.5 h-3.5 inline mr-1.5" />
-          <span>Rak WH2 (6 Rak)</span>
+          <span>{t('adm_tab_racks')}</span>
         </button>
 
         <button
@@ -279,7 +278,7 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <Users className="w-3.5 h-3.5 inline mr-1.5" />
-          <span>Pengguna & RBAC</span>
+          <span>{t('adm_tab_users')}</span>
         </button>
 
         <button
@@ -289,7 +288,7 @@ export const AdminView: React.FC = () => {
           }`}
         >
           <FileSpreadsheet className="w-3.5 h-3.5 inline mr-1.5" />
-          <span>Impor / Ekspor Excel</span>
+          <span>{t('adm_tab_impexp')}</span>
         </button>
       </div>
 
@@ -308,10 +307,10 @@ export const AdminView: React.FC = () => {
             <div>
               <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                 <Wrench className="w-5 h-5 text-amber-600" />
-                <span>Suite Audit & Pembersihan Data Otomatis (Bagian C Checklist)</span>
+                <span>{t('adm_clean_title')}</span>
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                Memperbaiki 171 lokasi kosong, memulihkan leading zeroes serial, menormalisasi WH2/SW/QA, dan mengisi nama mesin otomatis.
+                {t('adm_clean_desc')}
               </p>
             </div>
 
@@ -319,10 +318,10 @@ export const AdminView: React.FC = () => {
               <button
                 onClick={handleClearDatabase}
                 className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors"
-                title="Hapus seluruh data dummy / cache lokal agar database bersih 0 mesin"
+                title={t('adm_clear_title')}
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />
-                <span>Hapus Data Dummy</span>
+                <span>{t('adm_clear_btn')}</span>
               </button>
 
               <button
@@ -330,7 +329,7 @@ export const AdminView: React.FC = () => {
                 className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 transition-transform active:scale-95"
               >
                 <Wrench className="w-4 h-4" />
-                <span>Jalankan Audit & Auto-Fix Sekarang</span>
+                <span>{t('adm_run_audit')}</span>
               </button>
             </div>
           </div>
@@ -339,15 +338,15 @@ export const AdminView: React.FC = () => {
           {auditResult && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs pt-2">
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="text-slate-500">171 Lokasi Kosong Diperbaiki</div>
+                <div className="text-slate-500">{t('adm_m_empty')}</div>
                 <div className="text-2xl font-black text-emerald-700 font-mono mt-1">
                   +{auditResult.fixedEmptyLocations}
                 </div>
-                <div className="text-[10px] text-slate-500">Diisi PWx-UNASSIGNED</div>
+                <div className="text-[10px] text-slate-500">{t('adm_m_empty_sub')}</div>
               </div>
 
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="text-slate-500">Normalisasi WH2/SW/QA</div>
+                <div className="text-slate-500">{t('adm_m_norm')}</div>
                 <div className="text-2xl font-black text-cyan-700 font-mono mt-1">
                   +{auditResult.normalizedLegacyCodes}
                 </div>
@@ -355,7 +354,7 @@ export const AdminView: React.FC = () => {
               </div>
 
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="text-slate-500">Nama Mesin Standar Dipulihkan</div>
+                <div className="text-slate-500">{t('adm_m_names')}</div>
                 <div className="text-2xl font-black text-emerald-700 font-mono mt-1">
                   +{auditResult.fixedMissingNames}
                 </div>
@@ -363,22 +362,22 @@ export const AdminView: React.FC = () => {
               </div>
 
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="text-slate-500">Model Spasi Dirapikan (Trim)</div>
+                <div className="text-slate-500">{t('adm_m_trim')}</div>
                 <div className="text-2xl font-black text-purple-700 font-mono mt-1">
                   +{auditResult.fixedTrimSpaces}
                 </div>
               </div>
 
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="text-slate-500">Serial Berspasi Ditandai</div>
+                <div className="text-slate-500">{t('adm_m_serial')}</div>
                 <div className="text-2xl font-black text-amber-700 font-mono mt-1">
                   +{auditResult.flaggedSerials}
                 </div>
-                <div className="text-[10px] text-slate-500">Ditandai di Data Flag</div>
+                <div className="text-[10px] text-slate-500">{t('adm_m_serial_sub')}</div>
               </div>
 
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="text-slate-500">Sinkronisasi Site ID & Prefix</div>
+                <div className="text-slate-500">{t('adm_m_sync')}</div>
                 <div className="text-2xl font-black text-emerald-700 font-mono mt-1">
                   +{auditResult.fixedFacMappings}
                 </div>
@@ -388,31 +387,31 @@ export const AdminView: React.FC = () => {
 
           {/* Checklist Status */}
           <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
-            <h3 className="font-bold text-slate-900 mb-2">Item Checklist Bagian C yang Aktif & Terpenuhi:</h3>
+            <h3 className="font-bold text-slate-900 mb-2">{t('adm_check_title')}</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>171 baris Location ID kosong -&gt; PWx-UNASSIGNED</span>
+                <span>{t('adm_check_1')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Serial dengan leading zero dipertahankan (tipe Plain Text)</span>
+                <span>{t('adm_check_2')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Normalisasi lokasi WH2, SW, QA ke kode standar</span>
+                <span>{t('adm_check_3')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>3 mesin tanpa nama diisi 'Automatic Placket Attaching Machine'</span>
+                <span>{t('adm_check_4')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Label QR Code menerima Barcode 12-digit atau Asset Code</span>
+                <span>{t('adm_check_5')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Site ID otomatis terisi dari awalan Location ID</span>
+                <span>{t('adm_check_6')}</span>
               </div>
             </div>
           </div>
@@ -424,18 +423,18 @@ export const AdminView: React.FC = () => {
         <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
           <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
             <Building className="w-5 h-5 text-blue-600" />
-            <span>Daftar Site & Tambah Site Baru dengan Template Line</span>
+            <span>{t('adm_sites_title')}</span>
           </h2>
 
           {/* Add Site Form */}
           <form onSubmit={handleAddSite} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-            <div className="text-xs font-bold text-slate-700">Tambah Site Baru:</div>
+            <div className="text-xs font-bold text-slate-700">{t('adm_add_site')}</div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <input
                 type="text"
                 value={newSiteId}
                 onChange={(e) => setNewSiteId(e.target.value)}
-                placeholder="Site ID (cth: PW4)"
+                placeholder={t('adm_ph_siteid')}
                 className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 uppercase font-bold focus:outline-none focus:border-blue-500"
                 required
               />
@@ -443,7 +442,7 @@ export const AdminView: React.FC = () => {
                 type="text"
                 value={newSiteName}
                 onChange={(e) => setNewSiteName(e.target.value)}
-                placeholder="Nama Site (cth: PT.WINNERS(4))"
+                placeholder={t('adm_ph_sitename')}
                 className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
                 required
               />
@@ -452,10 +451,10 @@ export const AdminView: React.FC = () => {
                 onChange={(e) => setNewSiteType(e.target.value as 'FACTORY' | 'WAREHOUSE' | 'LAB' | 'SITE')}
                 className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
               >
-                <option value="FACTORY">Pabrik (FACTORY)</option>
-                <option value="WAREHOUSE">Gudang (WAREHOUSE)</option>
-                <option value="LAB">Laboratorium (LAB)</option>
-                <option value="SITE">Site Umum (SITE)</option>
+                <option value="FACTORY">{t('adm_opt_factory')}</option>
+                <option value="WAREHOUSE">{t('adm_opt_warehouse')}</option>
+                <option value="LAB">{t('adm_opt_lab')}</option>
+                <option value="SITE">{t('adm_opt_site')}</option>
               </select>
             </div>
             <button
@@ -463,7 +462,7 @@ export const AdminView: React.FC = () => {
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
             >
               <Plus className="w-4 h-4" />
-              <span>Tambah Site (Generate Line 1-30 & Extra Otomatis)</span>
+              <span>{t('adm_add_site_btn')}</span>
             </button>
           </form>
 
@@ -479,7 +478,7 @@ export const AdminView: React.FC = () => {
                 </div>
                 <div className="font-bold text-slate-900">{s.name}</div>
                 <div className="text-[11px] text-slate-500">
-                  {storageService.getLocations(s.siteId).length} lokasi terdaftar
+                  {t('adm_site_locs', { n: storageService.getLocations(s.siteId).length })}
                 </div>
               </div>
             ))}
@@ -493,10 +492,10 @@ export const AdminView: React.FC = () => {
           <div>
             <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
               <Layers className="w-5 h-5 text-indigo-600" />
-              <span>Konfigurasi 6 Rak Warehouse 2 (WH2)</span>
+              <span>{t('adm_racks_title')}</span>
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Setiap rak memiliki 3 stack (A, B, C). Mengubah jumlah kolom otomatis membuat slot baru berkode WH2-R{'{rak}'}-{'{kolom}'}{'{stack}'}.
+              {t('adm_racks_desc', { code: 'WH2-R{rak}-{kolom}{stack}' })}
             </p>
           </div>
 
@@ -506,14 +505,14 @@ export const AdminView: React.FC = () => {
               return (
                 <div key={rack.rackNo} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-sm text-slate-900">Rak {rack.rackNo}</span>
+                    <span className="font-extrabold text-sm text-slate-900">{t('adm_rack_n', { n: rack.rackNo })}</span>
                     <span className="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded">
-                      {slotsCount} Slot (3 Stack A/B/C)
+                      {t('adm_rack_slots', { n: slotsCount })}
                     </span>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[11px] text-slate-600">Jumlah Kolom Rak:</label>
+                    <label className="text-[11px] text-slate-600">{t('adm_rack_cols')}</label>
                     <div className="flex items-center gap-2">
                       <input
                         type="number"
@@ -523,12 +522,12 @@ export const AdminView: React.FC = () => {
                         onBlur={(e) => handleUpdateRack(rack.rackNo, Number(e.target.value))}
                         className="bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-mono w-24 focus:outline-none focus:border-indigo-500"
                       />
-                      <span className="text-slate-500 text-[11px]">kolom</span>
+                      <span className="text-slate-500 text-[11px]">{t('adm_rack_col_unit')}</span>
                     </div>
                   </div>
 
                   <div className="text-[10px] text-slate-500">
-                    Contoh format slot: <span className="font-mono text-cyan-700 font-semibold">WH2-R{rack.rackNo}-1A</span>,{' '}
+                    {t('adm_rack_example')} <span className="font-mono text-cyan-700 font-semibold">WH2-R{rack.rackNo}-1A</span>,{' '}
                     <span className="font-mono text-cyan-700 font-semibold">WH2-R{rack.rackNo}-1B</span>
                   </div>
                 </div>
@@ -543,18 +542,18 @@ export const AdminView: React.FC = () => {
         <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
           <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
             <Users className="w-5 h-5 text-emerald-600" />
-            <span>Kelola Pengguna & Hak Akses Berdasarkan Site (A4)</span>
+            <span>{t('adm_users_title')}</span>
           </h2>
 
           {/* Add User Form */}
           <form onSubmit={handleAddUser} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
-            <div className="font-bold text-slate-700">Tambah Akun Pengguna Baru:</div>
+            <div className="font-bold text-slate-700">{t('adm_add_user')}</div>
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <input
                 type="text"
                 value={newUsername}
                 onChange={(e) => setNewUsername(e.target.value)}
-                placeholder="Username (cth: mechanic_pw4)"
+                placeholder={t('adm_ph_username')}
                 className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-500"
                 required
               />
@@ -562,7 +561,7 @@ export const AdminView: React.FC = () => {
                 type="text"
                 value={newDisplayName}
                 onChange={(e) => setNewDisplayName(e.target.value)}
-                placeholder="Nama Lengkap & Jabatan"
+                placeholder={t('adm_ph_fullname')}
                 className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-500"
                 required
               />
@@ -580,7 +579,7 @@ export const AdminView: React.FC = () => {
                 type="text"
                 value={newUserSiteAccess}
                 onChange={(e) => setNewUserSiteAccess(e.target.value)}
-                placeholder="Site Access (cth: PW1, PW2 atau ALL)"
+                placeholder={t('adm_ph_siteaccess')}
                 className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-emerald-500"
                 required
               />
@@ -590,7 +589,7 @@ export const AdminView: React.FC = () => {
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
             >
               <Plus className="w-4 h-4" />
-              <span>Simpan Pengguna</span>
+              <span>{t('adm_save_user')}</span>
             </button>
           </form>
 
@@ -600,11 +599,11 @@ export const AdminView: React.FC = () => {
               <thead className="bg-slate-100 text-slate-600 uppercase text-[10px]">
                 <tr>
                   <th className="p-3">Username</th>
-                  <th className="p-3">Nama Pengguna</th>
+                  <th className="p-3">{t('adm_th_user')}</th>
                   <th className="p-3">Role</th>
-                  <th className="p-3">Akses Site</th>
-                  <th className="p-3">Status Kunci</th>
-                  <th className="p-3 text-right">Aksi</th>
+                  <th className="p-3">{t('adm_th_access')}</th>
+                  <th className="p-3">{t('adm_th_lock')}</th>
+                  <th className="p-3 text-right">{t('actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700 bg-white">
@@ -625,12 +624,12 @@ export const AdminView: React.FC = () => {
                         {isLocked ? (
                           <span className="text-rose-600 font-bold flex items-center gap-1">
                             <Lock className="w-3.5 h-3.5" />
-                            <span>Terkunci (5x Gagal)</span>
+                            <span>{t('adm_locked')}</span>
                           </span>
                         ) : (
                           <span className="text-emerald-700 font-semibold flex items-center gap-1">
                             <Unlock className="w-3.5 h-3.5" />
-                            <span>Normal</span>
+                            <span>{t('adm_normal')}</span>
                           </span>
                         )}
                       </td>
@@ -640,7 +639,7 @@ export const AdminView: React.FC = () => {
                             onClick={() => handleUnlock(u.username)}
                             className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-bold"
                           >
-                            Buka Kunci
+                            {t('adm_unlock')}
                           </button>
                         )}
                       </td>
@@ -659,32 +658,32 @@ export const AdminView: React.FC = () => {
           <div>
             <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
               <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-              <span>Ekspor Cadangan Lengkap & Impor File Excel</span>
+              <span>{t('adm_ie_title')}</span>
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Unduh cadangan data mesin atau perbarui database melalui file Excel .xlsx
+              {t('adm_ie_desc')}
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
-              <div className="font-bold text-slate-900 text-sm">Ekspor Database Lengkap:</div>
+              <div className="font-bold text-slate-900 text-sm">{t('adm_exp_title')}</div>
               <p className="text-slate-500">
-                Unduh seluruh data mesin PT.WINNERS beserta riwayat lengkap dalam format file Excel .xlsx
+                {t('adm_exp_desc')}
               </p>
               <button
                 onClick={handleExportFullDb}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-2 shadow-sm"
               >
                 <Download className="w-4 h-4" />
-                <span>Unduh Excel Backup (.xlsx)</span>
+                <span>{t('adm_exp_btn')}</span>
               </button>
             </div>
 
             <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
-              <div className="font-bold text-slate-900 text-sm">Impor File Excel / CSV:</div>
+              <div className="font-bold text-slate-900 text-sm">{t('adm_imp_title')}</div>
               <p className="text-slate-500">
-                Pilih file .xlsx untuk melakukan batch update data mesin dengan validasi format otomatis.
+                {t('adm_imp_desc')}
               </p>
               <input
                 type="file"
@@ -700,12 +699,9 @@ export const AdminView: React.FC = () => {
                         const wsname = wb.SheetNames[0];
                         const ws = wb.Sheets[wsname];
                         const data = XLSX.utils.sheet_to_json(ws);
-                        setNotification(
-                          `File ${file.name} terbaca (${data.length} baris), tapi impor batch belum tersedia di versi Supabase. ` +
-                            'Data belum tersimpan ke database. Gunakan SQL Editor Supabase untuk impor massal.'
-                        );
+                        setNotification(t('adm_imp_read', { name: file.name, rows: data.length }));
                       } catch {
-                        setNotification(`Gagal membaca file ${file.name}. Pastikan formatnya .xlsx, .xls, atau .csv yang valid.`);
+                        setNotification(t('adm_imp_fail', { name: file.name }));
                       }
                     };
                     reader.readAsBinaryString(file);

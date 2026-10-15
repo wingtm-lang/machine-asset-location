@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../services/authContext';
+import { makeT, localizeMessage } from '../services/translations';
 import { KeyRound, X, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface ChangePasswordModalProps {
@@ -13,7 +14,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { changePassword } = useAuth();
+  const { changePassword, language } = useAuth();
+  const t = makeT(language);
 
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -31,17 +33,17 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     setStatusNotice(null);
 
     if (!oldPassword) {
-      setStatusNotice({ type: 'error', text: 'Password lama wajib diisi.' });
+      setStatusNotice({ type: 'error', text: t('shell_cp_old_required') });
       return;
     }
 
-    if (newPassword.length < 10) {
-      setStatusNotice({ type: 'error', text: 'Password baru minimal harus 10 karakter.' });
+    if (newPassword.length < 6) {
+      setStatusNotice({ type: 'error', text: t('shell_cp_min_len') });
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setStatusNotice({ type: 'error', text: 'Konfirmasi password baru tidak cocok.' });
+      setStatusNotice({ type: 'error', text: t('shell_cp_mismatch') });
       return;
     }
 
@@ -52,7 +54,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       if (res.success) {
         setStatusNotice({
           type: 'success',
-          text: res.message || 'Password berhasil diubah.',
+          text: localizeMessage(res.message, language) || t('shell_cp_success'),
         });
         setTimeout(() => {
           setOldPassword('');
@@ -65,13 +67,13 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       } else {
         setStatusNotice({
           type: 'error',
-          text: res.message || 'Gagal mengubah password.',
+          text: localizeMessage(res.message, language) || t('shell_cp_failed'),
         });
       }
     } catch (err: any) {
       setStatusNotice({
         type: 'error',
-        text: err.message || 'Terjadi kesalahan sistem.',
+        text: localizeMessage(err.message, language) || t('shell_cp_system_error'),
       });
     } finally {
       setIsSubmitting(false);
@@ -87,7 +89,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               <KeyRound className="w-4 h-4" />
             </div>
             <h2 className="text-base font-bold text-slate-900 dark:text-white">
-              Ubah Password Akun
+              {t('change_password_title')}
             </h2>
           </div>
           <button
@@ -120,14 +122,14 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-              Password Lama
+              {t('old_password')}
             </label>
             <input
               type="password"
               value={oldPassword}
               disabled={isSubmitting}
               onChange={(e) => setOldPassword(e.target.value)}
-              placeholder="Masukkan password saat ini"
+              placeholder={t('old_password_ph')}
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
               required
             />
@@ -135,14 +137,14 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-              Password Baru
+              {t('new_password')}
             </label>
             <input
               type="password"
               value={newPassword}
               disabled={isSubmitting}
               onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Minimal 10 karakter"
+              placeholder={t('shell_cp_new_ph')}
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
               required
             />
@@ -150,14 +152,14 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-              Konfirmasi Password Baru
+              {t('confirm_new_password')}
             </label>
             <input
               type="password"
               value={confirmPassword}
               disabled={isSubmitting}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Ulangi password baru"
+              placeholder={t('confirm_new_password_ph')}
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
               required
             />
@@ -170,7 +172,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               onClick={onClose}
               className="px-3.5 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
-              Batal
+              {t('cancel')}
             </button>
             <button
               type="submit"
@@ -180,10 +182,10 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Menyimpan...</span>
+                  <span>{t('shell_cp_saving')}</span>
                 </>
               ) : (
-                <span>Simpan Perubahan</span>
+                <span>{t('save_changes')}</span>
               )}
             </button>
           </div>

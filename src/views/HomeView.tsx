@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAuth } from '../services/authContext';
+import { makeT } from '../services/translations';
 import {
   LayoutDashboard,
   Boxes,
@@ -22,102 +23,104 @@ import {
 interface HomeViewProps {
   onNavigateTab: (tab: string) => void;
   onOpenScanner?: () => void;
+  onOpenBenchmark?: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateTab,
   onOpenScanner,
 }) => {
-  const { currentUser, canUseRackMap, canAddUser, canPerformAction } = useAuth();
+  const { currentUser, canUseRackMap, canAddUser, canPerformAction, language } = useAuth();
+  const t = makeT(language);
   const siteList = currentUser?.siteAccess || [];
 
   const modules = [
     {
       id: 'dashboard',
-      title: 'Dashboard Asset',
-      desc: 'Ringkasan metrik total mesin, distribusi per site/pabrik, dan status operasional.',
+      title: t('home_mod_dashboard_title'),
+      desc: t('home_mod_dashboard_desc'),
       icon: LayoutDashboard,
       allowed: true,
-      badge: 'Live Metrik',
+      badge: t('home_mod_dashboard_badge'),
     },
     {
       id: 'machines',
-      title: 'Data Mesin',
-      desc: 'Pencarian & inventaris mesin jahit, detail serial, mutasi batch, dan filter status.',
+      title: t('home_mod_machines_title'),
+      desc: t('home_mod_machines_desc'),
       icon: Boxes,
       allowed: true,
-      badge: 'Inventaris',
+      badge: t('home_mod_machines_badge'),
     },
     {
       id: 'rackmap',
-      title: 'WH2 Rack Map',
-      desc: 'Denah interaktif rak Warehouse 2 (R1–R6, tingkat A–C) dengan slot mesin per kolom.',
+      title: t('home_mod_rackmap_title'),
+      desc: t('home_mod_rackmap_desc'),
       icon: Grid,
       allowed: canUseRackMap,
-      badge: 'WH2 Denah',
-      lockedNote: 'Khusus Warehouse 2 / All Sites / Admin',
+      badge: t('home_mod_rackmap_badge'),
+      lockedNote: t('home_mod_rackmap_locked'),
     },
     {
       id: 'move',
-      title: 'Pindahkan Lokasi',
-      desc: 'Mutasi posisi mesin ke line atau rak tertentu secara individual maupun batch.',
+      title: t('home_mod_move_title'),
+      desc: t('home_mod_move_desc'),
       icon: Layers,
       allowed: canPerformAction('MOVE') || canPerformAction('CHANGE_STATUS'),
-      badge: 'Mutasi Cepat',
-      lockedNote: 'Perlu hak akses pemindahan',
+      badge: t('home_mod_move_badge'),
+      lockedNote: t('home_mod_move_locked'),
     },
     {
       id: 'transfers',
-      title: 'Transfer Antar Site',
-      desc: 'Alur kirim dan terima mesin antar pabrik (PW1, PW2, PW3, WH2, SW, QA) via In-Transit.',
+      title: t('home_mod_transfers_title'),
+      desc: t('home_mod_transfers_desc'),
       icon: ArrowRightLeft,
       allowed: canPerformAction('TRANSFER'),
-      badge: 'Antar Pabrik',
-      lockedNote: 'Perlu hak akses transfer',
+      badge: t('home_mod_transfers_badge'),
+      lockedNote: t('home_mod_transfers_locked'),
     },
     {
       id: 'opname',
-      title: 'Weekly Machine List',
-      desc: 'Rekonsiliasi berkala fisik mesin dengan pemindai barcode / QR dan catat selisih lokasi.',
+      title: t('home_mod_opname_title'),
+      desc: t('home_mod_opname_desc'),
       icon: ClipboardCheck,
       allowed: canPerformAction('OPNAME'),
-      badge: 'Audit Fisik',
-      lockedNote: 'Perlu hak akses audit opname',
+      badge: t('home_mod_opname_badge'),
+      lockedNote: t('home_mod_opname_locked'),
     },
     {
       id: 'history',
-      title: 'Riwayat Mesin',
-      desc: 'Lihat riwayat pemindahan mesin di site Anda.',
+      title: t('home_mod_history_title'),
+      desc: t('home_mod_history_desc'),
       icon: History,
       allowed: true,
-      badge: 'Riwayat',
+      badge: t('home_mod_history_badge'),
     },
     {
       id: 'reports',
-      title: 'Laporan Harian',
-      desc: 'Laporan harian, rekapitulasi pergerakan mesin, dan penerima email.',
+      title: t('home_mod_reports_title'),
+      desc: t('home_mod_reports_desc'),
       icon: FileText,
       allowed: canPerformAction('REPORTS'),
-      badge: 'Laporan',
-      lockedNote: 'Khusus Admin Master & All Sites',
+      badge: t('home_mod_reports_badge'),
+      lockedNote: t('home_mod_reports_locked'),
     },
     {
       id: 'users',
-      title: 'Kelola Pengguna',
-      desc: 'Manajemen akun user, penambahan NIK baru, dan pengaturan hak akses otoritas.',
+      title: t('home_mod_users_title'),
+      desc: t('home_mod_users_desc'),
       icon: Users,
       allowed: canAddUser,
-      badge: 'Admin Master',
-      lockedNote: 'Hanya Admin Master',
+      badge: t('home_mod_users_badge'),
+      lockedNote: t('home_mod_users_locked'),
     },
     {
       id: 'admin',
-      title: 'Admin & Integrasi GAS',
-      desc: 'Sinkronisasi Google Spreadsheet, generator backend Code.gs, dan audit konsistensi data.',
+      title: t('home_mod_admin_title'),
+      desc: t('home_mod_admin_desc'),
       icon: ShieldAlert,
       allowed: canPerformAction('ADMIN') || canAddUser,
-      badge: 'Backend GAS',
-      lockedNote: 'Khusus Admin Master',
+      badge: t('home_mod_admin_badge'),
+      lockedNote: t('home_mod_admin_locked'),
     },
   ];
 
@@ -139,14 +142,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div>
             <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#ffd23f]/15 border border-[#ffd23f]/40 text-[#ffd23f] text-xs font-mono font-bold uppercase tracking-wider mb-2">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Otoritas: {currentUser?.role || 'User'}</span>
+              <span>{t('home_authority', { role: currentUser?.role || 'User' })}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Halo, {currentUser?.displayName || 'Pengguna'}!
+              {t('home_hello', { name: currentUser?.displayName || t('home_user_fallback') })}
             </h1>
             <p className="text-xs sm:text-sm text-[#cfe6ff]/85 mt-1.5 max-w-2xl leading-relaxed">
-              Selamat datang di sistem <strong>MACHINE ASSET MANAGEMENT</strong> PT. WINNERS INTERNATIONAL.
-              Seluruh modul pelacakan, mutasi, denah rak, dan transfer mesin siap digunakan sesuai hak akses Anda.
+              {t('home_welcome_pre')} <strong>MACHINE ASSET MANAGEMENT</strong> {t('home_welcome_post')}
             </p>
           </div>
 
@@ -158,12 +160,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#ffd23f] to-[#f59e0b] hover:from-[#ffe066] hover:to-[#fbbf24] text-[#0c2e57] font-black text-xs flex items-center gap-2 shadow-lg shadow-black/30 transition-transform active:scale-95 cursor-pointer"
               >
                 <QrCode className="w-4 h-4 stroke-[2.5]" />
-                <span>Scan Barcode</span>
+                <span>{t('home_scan_barcode')}</span>
               </button>
             )}
 
             <div className="bg-[#081f3c]/90 px-3.5 py-2.5 rounded-xl border border-[#234d82]/70 text-right">
-              <div className="text-[10px] text-[#7fb2e8] font-mono">NIK Akun</div>
+              <div className="text-[10px] text-[#7fb2e8] font-mono">{t('home_nik')}</div>
               <div className="text-sm font-mono font-bold text-white">
                 {currentUser?.username}
               </div>
@@ -175,7 +177,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <div className="relative z-10 mt-6 pt-5 border-t border-[#1e4676]/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#cfe6ff]/80">
             <Building2 className="w-4 h-4 text-[#ffd23f]" />
-            <span>Site Aktif yang Dapat Anda Akses:</span>
+            <span>{t('home_active_sites')}</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {siteList.map((site) => (
@@ -188,7 +190,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </span>
             ))}
             {siteList.length === 0 && (
-              <span className="text-xs text-[#cfe6ff]/60">Tidak ada site terdaftar</span>
+              <span className="text-xs text-[#cfe6ff]/60">{t('home_no_sites')}</span>
             )}
           </div>
         </div>
@@ -198,10 +200,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
       <div>
         <div className="flex items-center justify-between mb-4 px-1">
           <h2 className="text-xs font-bold font-mono text-[#0c2e57] dark:text-[#7fb2e8] uppercase tracking-wider">
-            Daftar Modul Sistem Mesin
+            {t('home_modules_heading')}
           </h2>
           <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-            Pilih modul untuk mulai bekerja
+            {t('home_pick_module')}
           </span>
         </div>
 
@@ -233,7 +235,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-slate-100 dark:border-[#1a385f] flex items-center justify-between text-xs font-bold text-[#0c2e57] dark:text-[#ffd23f]">
-                    <span>Buka Modul</span>
+                    <span>{t('home_open_module')}</span>
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </div>
                 </div>
@@ -252,7 +254,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <Lock className="w-5 h-5" />
                     </div>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-200 dark:bg-[#0c223c] text-slate-500">
-                      Terkunci
+                      {t('home_locked')}
                     </span>
                   </div>
                   <h3 className="text-base font-bold text-slate-700 dark:text-slate-300 tracking-tight">
@@ -264,7 +266,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-200/50 dark:border-[#142841] text-[11px] font-mono text-slate-400 dark:text-slate-500">
-                  {mod.lockedNote || 'Akses dibatasi untuk otoritas Anda'}
+                  {mod.lockedNote || t('home_restricted')}
                 </div>
               </div>
             );
