@@ -1032,7 +1032,27 @@ export const defaultTranslations: Translations = {
   um_activate_msg: { id: 'Akun ini akan dipulihkan dan dapat kembali login serta beraktivitas di sistem.', en: 'This account will be restored and can sign in and be active in the system again.' },
   um_processing: { id: 'Memproses...', en: 'Processing...' },
   um_yes_deactivate: { id: 'Ya, Nonaktifkan', en: 'Yes, Deactivate' },
-  um_yes_activate: { id: 'Ya, Aktifkan', en: 'Yes, Activate' }
+  um_yes_activate: { id: 'Ya, Aktifkan', en: 'Yes, Activate' },
+  // ---- LoginPage ----
+  lg_zoom_mechanic: { id: 'Zoom ke Mechanic', en: 'Zoom to Mechanic' },
+  lg_zoom_rack: { id: 'Zoom ke Rak', en: 'Zoom to Rack' },
+  lg_view_all: { id: 'Lihat semua', en: 'View all' },
+  lg_err_required: { id: 'NIK dan Password wajib diisi.', en: 'Employee ID and Password are required.' },
+  lg_err_failed: { id: 'Login gagal, periksa kembali NIK dan password.', en: 'Sign-in failed, please check your Employee ID and password.' },
+  lg_err_backend: { id: 'Gagal terhubung ke backend.', en: 'Failed to connect to the backend.' },
+  lg_door: { id: 'PINTU', en: 'DOOR' },
+  lg_level_c: { id: 'Tingkat C', en: 'Level C' },
+  lg_level_b: { id: 'Tingkat B · mesin jahit', en: 'Level B · sewing machine' },
+  lg_level_a: { id: 'Tingkat A', en: 'Level A' },
+  lg_steel: { id: 'Rangka baja', en: 'Steel frame' },
+  lg_axo_title: { id: 'AKSONOMETRIK', en: 'AXONOMETRIC' },
+  lg_axo_sub: { id: 'Axonometric · Rak R4 · potongan 3 dari 26 kolom', en: 'Axonometric · Rack R4 · section 3 of 26 columns' },
+  lg_callout_machine: { id: 'MESIN JAHIT', en: 'SEWING MACHINE' },
+  lg_callout_pos: { id: 'Kolom 2 · Slot 2', en: 'Column 2 · Slot 2' },
+  lg_svg_aria: { id: 'Denah Warehouse 2. Aktifkan untuk zoom ke area Mechanic', en: 'Warehouse 2 floor plan. Activate to zoom to the Mechanic area' },
+  lg_srv_on: { id: 'Server Terhubung', en: 'Server Connected' },
+  lg_srv_off: { id: 'Server Tidak Terhubung', en: 'Server Not Connected' },
+  lg_srv_check: { id: 'Memeriksa...', en: 'Checking...' },
 };
 
 export type Lang = 'id' | 'en';

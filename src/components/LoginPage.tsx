@@ -44,6 +44,7 @@ export const LoginPage: React.FC = () => {
   const stageRef = useRef<number>(0);
   const curRef = useRef<number[]>([-30, -22, 785, 500]);
   const rafRef = useRef<number | null>(null);
+  const autoPlayRef = useRef<boolean>(true);
 
   const full = [-30, -22, 785, 500];
   const zoom = [100, 2, 596, 84];
@@ -377,7 +378,33 @@ export const LoginPage: React.FC = () => {
       rafRef.current = requestAnimationFrame(step);
     }
 
-    function toggle() {
+    // Putar otomatis: denah penuh -> zoom Mechanic -> rak (aksonometrik) -> ulang.
+    // Berhenti begitu pengguna mengklik / menekan tombol.
+    const HOLD_MS = [4200, 3600, 8000];
+    let autoTimer: number | null = null;
+    const reduced = matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+    function stopAuto() {
+      autoPlayRef.current = false;
+      if (autoTimer) window.clearTimeout(autoTimer);
+      autoTimer = null;
+    }
+
+    function scheduleAuto() {
+      if (!autoPlayRef.current || reduced) return;
+      autoTimer = window.setTimeout(() => {
+        if (!autoPlayRef.current) return;
+        advance();
+        scheduleAuto();
+      }, HOLD_MS[stageRef.current]);
+    }
+
+    function userToggle() {
+      stopAuto();
+      advance();
+    }
+
+    function advance() {
       stageRef.current = (stageRef.current + 1) % 3;
       const stage = stageRef.current;
       const V = [full, zoom, rack];
@@ -389,21 +416,24 @@ export const LoginPage: React.FC = () => {
       go(V[stage]);
     }
 
+    scheduleAuto();
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        toggle();
+        userToggle();
       }
     };
 
-    svg.addEventListener('click', toggle);
+    svg.addEventListener('click', userToggle);
     svg.addEventListener('keydown', handleKeyDown);
-    zb.addEventListener('click', toggle);
+    zb.addEventListener('click', userToggle);
 
     return () => {
-      svg.removeEventListener('click', toggle);
+      if (autoTimer) window.clearTimeout(autoTimer);
+      svg.removeEventListener('click', userToggle);
       svg.removeEventListener('keydown', handleKeyDown);
-      zb.removeEventListener('click', toggle);
+      zb.removeEventListener('click', userToggle);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [language]);

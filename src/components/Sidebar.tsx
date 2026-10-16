@@ -207,17 +207,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     />
                     <span className="truncate">{item.label}</span>
                   </div>
-                  {item.badge && (
-                    <span
-                      className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full ${
-                        isActive
-                          ? 'bg-[#ffd23f] text-[#0c2e57] font-bold'
-                          : 'bg-[#0f3460]/60 text-[#cfe6ff]/90 border border-[#234b7e]/60'
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
                 </button>
               );
             })}
@@ -226,22 +215,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bagian Bawah: Profile Card, Quick Tools & Logout */}
       <div className="space-y-3 pt-4 border-t border-[#1d477c]/60 mt-4">
-        {/* Quick Tools Row (5.7k Test & Bahasa ID/EN) */}
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <button
-            type="button"
-            onClick={onOpenBenchmark}
-            className="p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#ffd23f]/30 bg-[#ffd23f]/10 hover:bg-[#ffd23f]/20 text-[#ffd23f] transition-all cursor-pointer shadow-2xs"
-            title={t('shell_bench_tool_title')}
-          >
-            <Zap className="w-3.5 h-3.5 fill-[#ffd23f] text-[#ffd23f]" />
-            <span>5.7k Test</span>
-          </button>
-
-          <button
+        {/* Quick Tools Row (Bahasa ID/EN) */}
+        <div className="text-xs">
+         <button
             type="button"
             onClick={() => setLanguage(language === 'id' ? 'en' : 'id')}
-            className="p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
+            className="w-full p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
             title={t('shell_lang_title')}
           >
             <Languages className="w-3.5 h-3.5 text-[#7fb2e8]" />
