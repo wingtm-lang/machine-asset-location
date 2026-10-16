@@ -24,6 +24,9 @@ interface ReportPayload {
   opname?: { count?: number; items?: any[] };
   recipients?: string[];
   last_sent?: string | null;
+  scope?: string;
+  sites?: string[];
+  all_allowed?: boolean;
 }
 
 const TZ = 'Asia/Jakarta';
@@ -61,7 +64,12 @@ function buildBody(p: ReportPayload, maxItems: number): string {
   const tr = p.transfers ?? {};
   const op = p.opname ?? { count: 0, items: [] };
 
-  L.push('Laporan Mingguan Aset Mesin PT.WINNERS INTERNATIONAL', `Periode: ${periodLabel(p)}`, '');
+  L.push(
+    'Laporan Mingguan Aset Mesin PT.WINNERS INTERNATIONAL',
+    `Cakupan: ${p.scope && p.scope !== 'ALL' ? `Site ${p.scope}` : 'Semua site'}`,
+    `Periode: ${periodLabel(p)}`,
+    ''
+  );
 
   L.push('PERLU PERHATIAN');
   const block = (title: string, b: { count: number; items: any[] } | undefined, row: (i: any) => string) => {
@@ -107,7 +115,7 @@ function buildBody(p: ReportPayload, maxItems: number): string {
     L.push('- Tidak ada sesi opname yang selesai minggu ini');
   } else {
     (op.items ?? []).slice(0, Math.max(maxItems, 3)).forEach((s: any) =>
-      L.push(`- ${s.session_no} | ${s.site} | cocok ${s.match} dari ${s.expected} | hilang ${s.missing} | salah lokasi ${s.misplaced}`));
+      L.push(`- ${s.session_no} | ${s.site} | Line ${s.line ? String(s.line).replace(/^line\s*/i, '').replace(/^[A-Za-z]+[-_\s]+(?=\d)/, '') : 'Semua line'} | cocok ${s.match} dari ${s.expected} | hilang ${s.missing} | salah lokasi ${s.misplaced}`));
     if ((op.count ?? 0) > Math.max(maxItems, 3)) L.push(`- dan ${(op.count ?? 0) - Math.max(maxItems, 3)} sesi lainnya`);
   }
 
@@ -119,7 +127,7 @@ const enc = (v: string) => encodeURIComponent(v);
 
 /** Tautan mailto yang tidak melebihi batas panjang Outlook; daftar dipangkas bila perlu. */
 function buildMailto(p: ReportPayload, subject: string): { url: string; trimmed: boolean } {
-  const to = (p.recipients ?? []).join(',');
+  const to = (p.recipients ?? []).join(';');
   for (const n of [5, 3, 1, 0]) {
     const url = `mailto:${to}?subject=${enc(subject)}&body=${enc(buildBody(p, n))}`;
     if (url.length <= 1900) return { url, trimmed: n < 5 };
@@ -146,6 +154,8 @@ export const ReportsView: React.FC = () => {
   const [name, setName] = useState<string>('');
   const [feedback, setFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [report, setReport] = useState<ReportPayload | null>(null);
+  const [site, setSite] = useState<string>('');
+  const canManage = isAdminMaster || site !== '';
   const [reportLoading, setReportLoading] = useState<boolean>(true);
   const [reportError, setReportError] = useState<string | null>(null);
 
@@ -153,7 +163,7 @@ export const ReportsView: React.FC = () => {
     setReportLoading(true);
     setReportError(null);
     try {
-      const { data, error } = await supabase.rpc('weekly_report_preview');
+      const { data, error } = await supabase.rpc('weekly_report_preview', { p_site: site || null });
       if (error) throw error;
       if (!data?.success) {
         setReport(null);
@@ -168,12 +178,12 @@ export const ReportsView: React.FC = () => {
       setReportLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language]);
+  }, [language, site]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('list_report_recipients');
+      const { data, error } = await supabase.rpc('list_report_recipients', { p_site: site || null });
       if (error) throw error;
       if (!data?.success) {
         setFeedback({ type: 'error', message: data?.message ? localizeMessage(data.message, language) : t('rp_load_failed') });
@@ -187,12 +197,22 @@ export const ReportsView: React.FC = () => {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language]);
+  }, [language, site]);
 
   useEffect(() => {
-    if (isAdminMaster) load();
-    else setLoading(false);
-  }, [load, isAdminMaster]);
+    if (canManage) load();
+    else {
+      setRecipients([]);
+      setLoading(false);
+    }
+  }, [load, canManage]);
+
+  // Akun non-admin yang punya beberapa site: laporan selalu untuk satu site (default site pertama)
+  useEffect(() => {
+    if (report && !report.all_allowed && site === '' && (report.sites ?? []).length > 0) {
+      setSite((report.sites ?? [])[0]);
+    }
+  }, [report, site]);
 
   useEffect(() => {
     loadReport();
@@ -201,14 +221,16 @@ export const ReportsView: React.FC = () => {
   // Catat (tanpa menunggu) bahwa laporan dibuka di Outlook + simpan angka pembanding minggu depan
   const recordSent = async () => {
     try {
-      await supabase.rpc('record_weekly_report_sent');
+      await supabase.rpc('record_weekly_report_sent', { p_site: site || null });
       await loadReport();
     } catch {
       /* pencatatan gagal tidak boleh menghalangi pengiriman */
     }
   };
 
-  const subject = report ? `Laporan Mingguan Aset Mesin: ${periodLabel(report)}` : '';
+  const subject = report
+    ? `Laporan Mingguan Aset Mesin${report.scope && report.scope !== 'ALL' ? ` ${report.scope}` : ''}: ${periodLabel(report)}`
+    : '';
 
   const handleOpenOutlook = () => {
     if (!report) return;
@@ -218,7 +240,7 @@ export const ReportsView: React.FC = () => {
 
   const handleOpenOutlookWeb = () => {
     if (!report) return;
-    const to = (report.recipients ?? []).join(',');
+    const to = (report.recipients ?? []).join(';');
     const url = `https://outlook.office.com/mail/deeplink/compose?to=${enc(to)}&subject=${enc(subject)}&body=${enc(buildBody(report, 10))}`;
     window.open(url, '_blank', 'noopener');
     void recordSent();
@@ -243,6 +265,7 @@ export const ReportsView: React.FC = () => {
         p_email: rEmail,
         p_name: rName,
         p_active: active,
+        p_site: site || null,
       });
       if (error) throw error;
       if (!data?.success) {
@@ -275,7 +298,7 @@ export const ReportsView: React.FC = () => {
     setBusy(true);
     setFeedback(null);
     try {
-      const { data, error } = await supabase.rpc('delete_report_recipient', { p_email: r.email });
+      const { data, error } = await supabase.rpc('delete_report_recipient', { p_email: r.email, p_site: site || null });
       if (error) throw error;
       if (!data?.success) {
         setFeedback({ type: 'error', message: data?.message ? localizeMessage(data.message, language) : t('rp_delete_failed') });
@@ -329,6 +352,24 @@ export const ReportsView: React.FC = () => {
         </div>
         <p className="text-xs text-slate-600 leading-relaxed">{t('rp_send_desc')}</p>
 
+        {report && ((report.sites ?? []).length > 1 || report.all_allowed) && (
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <span className="font-semibold">{t('rp_scope_label')}</span>
+            <select
+              value={site}
+              onChange={(e) => setSite(e.target.value)}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 bg-white"
+            >
+              {report.all_allowed && <option value="">{t('rp_all_sites')}</option>}
+              {(report.sites ?? []).map((sid) => (
+                <option key={sid} value={sid}>
+                  {sid}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
         {reportLoading && <p className="text-xs text-slate-500">{t('rp_report_loading')}</p>}
         {reportError && (
           <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-2.5">{reportError}</p>
@@ -343,7 +384,7 @@ export const ReportsView: React.FC = () => {
                   date: report.last_sent ? new Intl.DateTimeFormat(localeOf(language), { dateStyle: 'medium', timeStyle: 'short', timeZone: TZ }).format(new Date(report.last_sent)) : t('rp_never'),
                 })}
               </p>
-              <p>{t('rp_count', { n: (report.recipients ?? []).length })}: {(report.recipients ?? []).join(', ') || '-'}</p>
+              <p>{t('rp_count', { n: (report.recipients ?? []).length })}: {(report.recipients ?? []).join('; ') || '-'}</p>
             </div>
 
             {(report.recipients ?? []).length === 0 && (
@@ -422,13 +463,13 @@ export const ReportsView: React.FC = () => {
           </button>
         </div>
 
-        {!isAdminMaster && (
+        {!canManage && (
           <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
-            {t('rp_admin_only')}
+            {t('rp_manage_note')}
           </p>
         )}
 
-        {isAdminMaster && (
+        {canManage && (
           <form onSubmit={handleAdd} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
             <input
               type="email"
@@ -473,18 +514,18 @@ export const ReportsView: React.FC = () => {
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    disabled={!isAdminMaster || busy}
+                    disabled={!canManage || busy}
                     onClick={() => save(r.email, r.name, !r.active)}
                     title={t('rp_toggle_title')}
                     className={`px-2.5 py-1 rounded-full text-[10px] font-bold border disabled:opacity-60 ${
                       r.active
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                         : 'bg-slate-100 text-slate-500 border-slate-200'
-                    } ${isAdminMaster ? 'cursor-pointer' : 'cursor-default'}`}
+                    } ${canManage ? 'cursor-pointer' : 'cursor-default'}`}
                   >
                     {r.active ? t('rp_active') : t('rp_inactive')}
                   </button>
-                  {isAdminMaster && (
+                  {canManage && (
                     <button
                       type="button"
                       disabled={busy}

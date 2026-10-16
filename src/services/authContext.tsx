@@ -188,7 +188,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       case 'ADMIN':
         return isAdminMaster;
       case 'REPORTS':
-        return isAdminMaster || isAllSites;
+        return true;
       case 'MOVE':
       case 'TRANSFER':
       case 'OPNAME':
