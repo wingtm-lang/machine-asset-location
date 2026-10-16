@@ -16,6 +16,19 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isServerConnected, setIsServerConnected] = useState<boolean | null>(null);
 
+  // Tampilkan pemberitahuan bila sesi sebelumnya berakhir karena batas 6 jam
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('wm_session_expired') === '1') {
+        localStorage.removeItem('wm_session_expired');
+        setErrorMessage(t('lg_session_expired'));
+      }
+    } catch {
+      /* abaikan */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Ping backend on mount to check connection & status
   useEffect(() => {
     let isMounted = true;

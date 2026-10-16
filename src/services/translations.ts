@@ -1053,6 +1053,7 @@ export const defaultTranslations: Translations = {
   lg_srv_on: { id: 'Server Terhubung', en: 'Server Connected' },
   lg_srv_off: { id: 'Server Tidak Terhubung', en: 'Server Not Connected' },
   lg_srv_check: { id: 'Memeriksa...', en: 'Checking...' },
+  lg_session_expired: { id: 'Sesi login 6 jam telah berakhir. Silakan login kembali.', en: 'Your 6-hour login session has expired. Please sign in again.' },
 };
 
 export type Lang = 'id' | 'en';

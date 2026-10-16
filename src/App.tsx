@@ -40,6 +40,7 @@ const MainAppInner: React.FC = () => {
     canUseRackMap,
     canPerformAction,
     language,
+    logout,
   } = useAuth();
   const t = makeT(language);
 
@@ -68,6 +69,51 @@ const MainAppInner: React.FC = () => {
     if (!isLoadingSession && currentUser) {
       storageService.triggerAutoBackgroundSync(true);
     }
+  }, [isLoadingSession, currentUser?.username]);
+
+  // Batas waktu sesi login: maksimal 6 jam sejak login, lalu otomatis keluar
+  useEffect(() => {
+    if (isLoadingSession) return;
+    const KEY = 'wm_login_at';
+    const MAX_MS = 6 * 60 * 60 * 1000;
+
+    if (!currentUser) {
+      try { localStorage.removeItem(KEY); } catch { /* abaikan */ }
+      return;
+    }
+
+    const username = currentUser.username;
+    const readStart = (): number => {
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { u?: string; t?: number };
+          if (parsed.u === username && typeof parsed.t === 'number') return parsed.t;
+        }
+      } catch { /* abaikan */ }
+      const now = Date.now();
+      try { localStorage.setItem(KEY, JSON.stringify({ u: username, t: now })); } catch { /* abaikan */ }
+      return now;
+    };
+
+    const start = readStart();
+    const check = () => {
+      if (Date.now() - start >= MAX_MS) {
+        try { localStorage.setItem('wm_session_expired', '1'); } catch { /* abaikan */ }
+        logout();
+      }
+    };
+
+    check();
+    const timer = window.setInterval(check, 30 * 1000);
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', check);
+    };
   }, [isLoadingSession, currentUser?.username]);
 
   // Modals state
