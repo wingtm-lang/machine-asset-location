@@ -14,6 +14,7 @@ import {
   User,
   Clock,
   ExternalLink,
+  Pencil,
 } from 'lucide-react';
 import { Machine } from '../types';
 import { getMachineLabel } from '../utils/machineName';
@@ -22,6 +23,7 @@ import { getTranslation, makeT, localeOf, localizeMessage } from '../services/tr
 import { storageService } from '../services/storage';
 import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
 import { Pagination } from './Pagination';
+import { EditMachineNamesModal } from './EditMachineNamesModal';
 
 interface MachineDetailModalProps {
   machine: Machine | null;
@@ -36,7 +38,10 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
   onClose,
   onMoveClick,
 }) => {
-  const { language, canAccessSite, canPerformAction } = useAuth();
+  const { language, canAccessSite, canPerformAction, currentUser } = useAuth();
+  const roleKey = String(currentUser?.role || '').toLowerCase().replace(/[\s_-]/g, '');
+  const isAdminMaster = roleKey === 'adminmaster' || roleKey === 'admin';
+  const [editNamesOpen, setEditNamesOpen] = useState(false);
   const t = makeT(language);
   const [activeTab, setActiveTab] = useState<'info' | 'movements' | 'status_log' | 'qr_card'>('info');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -262,6 +267,16 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                   <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-emerald-700" />
                     <span>{t('md_spec_card')}</span>
+                    {isAdminMaster && (
+                      <button
+                        type="button"
+                        onClick={() => setEditNamesOpen(true)}
+                        className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 bg-white text-[10px] font-bold normal-case tracking-normal text-slate-700 hover:bg-slate-100 cursor-pointer"
+                      >
+                        <Pencil className="w-3 h-3" />
+                        {t('en_btn')}
+                      </button>
+                    )}
                   </div>
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-200/80">
@@ -571,6 +586,20 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
           )}
         </div>
       </div>
+      {editNamesOpen && (
+        <EditMachineNamesModal
+          assetCode={machine.assetCode}
+          standardName={machine.standardMachineName || ''}
+          localName={machine.localName || ''}
+          koreanName={machine.item || ''}
+          manufacturer={machine.manufacturer || ''}
+          onClose={() => setEditNamesOpen(false)}
+          onSaved={() => {
+            setEditNamesOpen(false);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 };

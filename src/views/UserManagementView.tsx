@@ -505,28 +505,13 @@ export const UserManagementView: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto py-2">
-      {/* Header Halaman */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 bg-purple-100/70 dark:bg-purple-950/60 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
-              {t('um_admin_only')}
-            </span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1.5 flex items-center gap-2">
-            <Users className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-            <span>{t('um_manage_users')}</span>
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            {t('um_page_sub')}
-          </p>
-        </div>
-
+      {/* Tombol segarkan (judul halaman dihilangkan; judul ada di Panel Control & Admin) */}
+      <div className="flex justify-end">
         <button
           type="button"
           disabled={isLoadingList}
           onClick={fetchUsers}
-          className="px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 flex items-center gap-2 shadow-xs transition-colors shrink-0 cursor-pointer min-h-[40px]"
+          className="px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center gap-2 shadow-xs transition-colors shrink-0 cursor-pointer min-h-[40px]"
         >
           <RotateCcw className={`w-4 h-4 ${isLoadingList ? 'animate-spin text-indigo-600' : ''}`} />
           <span>{isLoadingList ? t('um_loading') : t('refresh')}</span>

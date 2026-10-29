@@ -10,11 +10,10 @@ import {
   ClipboardCheck,
   History,
   FileText,
-  Users,
+  Wrench,
   ShieldAlert,
   Building2,
   ArrowRight,
-  ShieldCheck,
   CheckCircle2,
   Lock,
   QrCode,
@@ -50,6 +49,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
       icon: Boxes,
       allowed: true,
       badge: t('home_mod_machines_badge'),
+    },
+    {
+      id: 'nonsewing',
+      title: t('home_mod_nonsewing_title'),
+      desc: t('home_mod_nonsewing_desc'),
+      icon: Wrench,
+      allowed: true,
+      badge: t('home_mod_nonsewing_badge'),
     },
     {
       id: 'rackmap',
@@ -105,15 +112,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
       lockedNote: t('home_mod_reports_locked'),
     },
     {
-      id: 'users',
-      title: t('home_mod_users_title'),
-      desc: t('home_mod_users_desc'),
-      icon: Users,
-      allowed: canAddUser,
-      badge: t('home_mod_users_badge'),
-      lockedNote: t('home_mod_users_locked'),
-    },
-    {
       id: 'admin',
       title: t('home_mod_admin_title'),
       desc: t('home_mod_admin_desc'),
@@ -140,15 +138,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
           <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#ffd23f]/15 border border-[#ffd23f]/40 text-[#ffd23f] text-xs font-mono font-bold uppercase tracking-wider mb-2">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{t('home_authority', { role: currentUser?.role || 'User' })}</span>
-            </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               {t('home_hello', { name: currentUser?.displayName || t('home_user_fallback') })}
             </h1>
             <p className="text-xs sm:text-sm text-[#cfe6ff]/85 mt-1.5 max-w-2xl leading-relaxed">
-              {t('home_welcome_pre')} <strong>MACHINE ASSET MANAGEMENT</strong> {t('home_welcome_post')}
+              {t('home_welcome_pre')} <strong>MACHINE ASSET MANAGEMENT</strong> PT. WINNERS INTERNATIONAL.
             </p>
           </div>
 
@@ -164,12 +158,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </button>
             )}
 
-            <div className="bg-[#081f3c]/90 px-3.5 py-2.5 rounded-xl border border-[#234d82]/70 text-right">
-              <div className="text-[10px] text-[#7fb2e8] font-mono">{t('home_nik')}</div>
-              <div className="text-sm font-mono font-bold text-white">
-                {currentUser?.username}
-              </div>
-            </div>
           </div>
         </div>
 

@@ -2,30 +2,30 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Building2,
   Boxes,
-  Layers,
   ArrowRightLeft,
-  ClipboardCheck,
+  Wrench,
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
   Activity,
-  Search,
   ExternalLink,
   ShieldCheck,
   Clock,
   RotateCcw,
-  Grid,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
-import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
+import { getTranslation, makeT, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
+import { sortSites } from '../services/siteOrder';
+import { supabase } from '../services/supabase';
 import { gasAuthService, ServerMovementRecord } from '../services/gasAuthService';
 import { Machine, SiteId, MachineStatus, MachineListFilter } from '../types';
-import { PtWinnersLogo } from '../components/PtWinnersLogo';
+import { formatDateTime } from '../utils/dateTime';
 
 interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
   onOpenMachines: (filter: MachineListFilter) => void;
+  onOpenNonSewing?: (site: string) => void;
   onSelectMachine: (machine: Machine) => void;
   onOpenScanner: () => void;
 }
@@ -42,42 +42,61 @@ const STATUS_PILLS = [
 const CARD_BTN =
   'text-left w-full cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 hover:border-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500';
 
-function formatWibTimestamp(timestampStr: string, lang: 'id' | 'en'): string {
-  if (!timestampStr) return '-';
-  try {
-    // Parse timestamp sebagai WIB: new Date(timestamp.replace(' ', 'T') + '+07:00')
-    const date = new Date(timestampStr.replace(' ', 'T') + '+07:00');
-    if (isNaN(date.getTime())) return timestampStr;
-
-    const now = new Date();
-    const isToday =
-      date.getDate() === now.getDate() &&
-      date.getMonth() === now.getMonth() &&
-      date.getFullYear() === now.getFullYear();
-
-    if (isToday) {
-      return date.toLocaleTimeString(localeOf(lang), { hour: '2-digit', minute: '2-digit' });
-    } else {
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = date.toLocaleString(localeOf(lang), { month: 'short' });
-      const time = date.toLocaleTimeString(localeOf(lang), { hour: '2-digit', minute: '2-digit' });
-      return `${day} ${month} ${time}`;
-    }
-  } catch {
-    return timestampStr;
-  }
-}
+// Site yang hanya memiliki mesin non sewing: kartu membuka menu Mesin Non Sewing.
+const NON_SEWING_SITES = new Set(['WH1', 'WH3', 'SW', 'TBL', 'BO', 'GE', 'LAB']);
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateTab,
   onOpenMachines,
+  onOpenNonSewing,
   onSelectMachine,
-  onOpenScanner,
 }) => {
-  const { currentUser, language, canPerformAction, canAccessSite } = useAuth();
+  const { currentUser, language, canAccessSite } = useAuth();
   const t = makeT(language);
-  const machines = storageService.getAllMachines();
-  const sites = storageService.getSites();
+  const sewingMachines = storageService.getAllMachines();
+
+  // Mesin non sewing tidak dimuat storageService; ambil ringkasannya untuk dihitung bersama mesin sewing.
+  const [nonSewing, setNonSewing] = useState<Machine[]>([]);
+  const loadNonSewing = useCallback(async () => {
+    try {
+      const rows: Array<{ asset_code: string; site_id: string; status: string; standard_machine_name: string | null }> = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('machines')
+          .select('asset_code, site_id, status, standard_machine_name')
+          .eq('category', 'NON_SEWING')
+          .order('id')
+          .range(from, from + 999);
+        if (error) return; // kolom/ SQL belum terpasang: tampilkan mesin sewing saja
+        const part = (data ?? []) as unknown as typeof rows;
+        rows.push(...part);
+        if (part.length < 1000) break;
+      }
+      setNonSewing(
+        rows.map(
+          (r) =>
+            ({
+              assetCode: r.asset_code,
+              siteId: r.site_id,
+              status: r.status,
+              standardMachineName: r.standard_machine_name ?? '',
+            }) as unknown as Machine
+        )
+      );
+    } catch {
+      /* diabaikan: dashboard tetap menampilkan mesin sewing */
+    }
+  }, []);
+  useEffect(() => {
+    void loadNonSewing();
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') void loadNonSewing();
+    }, 60000);
+    return () => clearInterval(id);
+  }, [loadNonSewing]);
+
+  const machines = useMemo(() => [...sewingMachines, ...nonSewing], [sewingMachines, nonSewing]);
+  const sites = sortSites(storageService.getSites());
   const transfers = storageService.getTransfers();
   const opnameSessions = storageService.getOpnameSessions();
 
@@ -163,17 +182,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return map;
   }, [accessibleMachines]);
 
-  // Machine Types / Standard Name Breakdown
-  const machineTypeCounts = useMemo(() => {
+  // Populasi jenis mesin: dipisah mesin sewing dan non sewing (Top 8 masing-masing)
+  const topTypes = useCallback((list: Machine[]) => {
     const map: Record<string, number> = {};
-    for (const m of accessibleMachines) {
+    for (const m of list) {
       const name = m.standardMachineName || 'Unknown Type';
       map[name] = (map[name] || 0) + 1;
     }
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8);
-  }, [accessibleMachines]);
+  }, []);
+  const sewingTypeData = useMemo(() => {
+    const ns = new Set<Machine>(nonSewing);
+    const list = accessibleMachines.filter((m) => !ns.has(m));
+    return { total: list.length, rows: topTypes(list) };
+  }, [accessibleMachines, nonSewing, topTypes]);
+  const nonSewingTypeData = useMemo(() => {
+    const ns = new Set<Machine>(nonSewing);
+    const list = accessibleMachines.filter((m) => ns.has(m));
+    return { total: list.length, rows: topTypes(list) };
+  }, [accessibleMachines, nonSewing, topTypes]);
 
   // Status breakdown
   const statusCounts = useMemo(() => {
@@ -211,77 +240,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Welcome Banner */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-sky-700 via-cyan-600 to-teal-700 text-white shadow-lg relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+      {/* Banner ringkas */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-sky-900 to-sky-800 text-white shadow-md relative">
+        <button
+          type="button"
+          onClick={handleSyncFromSheet}
+          disabled={isSyncing}
+          className="absolute right-4 top-4 p-2 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-50 text-sky-100 transition-colors cursor-pointer"
+          title={isSyncing ? t('dash_syncing') : t('dash_sync_title')}
+          aria-label={t('dash_sync_btn')}
+        >
+          <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+        </button>
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-sky-100 bg-white/15 px-2.5 py-0.5 rounded-full border border-white/20 flex items-center gap-1.5">
-                <PtWinnersLogo className="w-3.5 h-3.5 object-contain" />
-                PT.WINNERS Asset System
-              </span>
-              <span className="text-xs text-sky-100/80 font-mono">
-                {t('dash_site_access', { sites: currentUser?.siteAccess.join(', ') ?? '' })}
-              </span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              {getTranslation('dashboard', language)} — {currentUser?.displayName}
-            </h1>
-            <p className="text-xs sm:text-sm text-sky-50/90">
+        <div className="space-y-3 pr-12">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">{t('dash_summary_title')}</h1>
+            <p className="text-xs sm:text-sm text-sky-100/90 mt-0.5">
               {isViewer ? t('dash_sub_viewer') : t('dash_sub_default')}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={onOpenScanner}
-              className="px-4 py-2.5 bg-white hover:bg-sky-50 text-sky-950 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95"
-            >
-              <Search className="w-4 h-4 text-sky-700" />
-              <span>{getTranslation('scan', language)}</span>
-            </button>
-
-            {canPerformAction('MOVE') && (
-              <button
-                onClick={() => onNavigateTab('move')}
-                className="px-4 py-2.5 bg-sky-950/60 hover:bg-sky-950 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-sky-400/30"
+          <div className="flex flex-wrap gap-1.5">
+            {sortSites((currentUser?.siteAccess ?? []).map((siteId) => ({ siteId }))).map(({ siteId }) => (
+              <span
+                key={siteId}
+                className="px-2 py-0.5 rounded-md bg-white/10 border border-white/15 text-[11px] font-mono font-semibold text-sky-50"
               >
-                <Layers className="w-4 h-4" />
-                <span>{getTranslation('move', language)}</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => onNavigateTab('rackmap')}
-              className="px-4 py-2.5 bg-teal-950/70 hover:bg-teal-900 text-teal-100 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-teal-400/30"
-              title={t('dash_rackmap_title')}
-            >
-              <Grid className="w-4 h-4 text-teal-300" />
-              <span>{t('dash_rackmap')}</span>
-            </button>
-
-            {canPerformAction('OPNAME') && (
-              <button
-                onClick={() => onNavigateTab('opname')}
-                className="px-4 py-2.5 bg-cyan-950/60 hover:bg-cyan-950 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-cyan-400/30"
-              >
-                <ClipboardCheck className="w-4 h-4" />
-                <span>{getTranslation('opname', language)}</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleSyncFromSheet}
-              disabled={isSyncing}
-              className="px-4 py-2.5 bg-sky-950/80 hover:bg-sky-950 disabled:opacity-50 text-sky-100 rounded-xl text-xs font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 border border-sky-300/30"
-              title={t('dash_sync_title')}
-            >
-              <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? t('dash_syncing') : t('dash_sync_btn')}</span>
-            </button>
+                {siteId}
+              </span>
+            ))}
           </div>
+
         </div>
       </div>
 
@@ -367,6 +357,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="text-[11px] text-slate-500">
             {t('dash_of_total', { n: machines.length.toLocaleString() })}
           </div>
+          <div className="text-[11px] text-slate-400">
+            {t('dash_split', { s: sewingMachines.length.toLocaleString(), n: nonSewing.length.toLocaleString() })}
+          </div>
         </button>
 
         {/* Aktif */}
@@ -449,7 +442,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 key={site.siteId}
                 type="button"
                 disabled={!hasAccess}
-                onClick={() => onOpenMachines({ site: site.siteId, status: 'ALL' })}
+                onClick={() =>
+                  NON_SEWING_SITES.has(site.siteId.toUpperCase()) && onOpenNonSewing
+                    ? onOpenNonSewing(site.siteId)
+                    : onOpenMachines({ site: site.siteId, status: 'ALL' })
+                }
                 className={`p-4 rounded-2xl border text-left transition-all hover:scale-[1.02] shadow-xs ${
                   hasAccess
                     ? 'bg-white border-slate-200/90 hover:border-emerald-500 hover:bg-emerald-50/30 cursor-pointer'
@@ -474,42 +471,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* TWO COLUMN BREAKDOWNS: Top Machine Types & Statuses */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Machine Types Breakdown */}
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-emerald-700" />
-              <span>{t('dash_type_pop')}</span>
-            </h3>
-            <span className="text-xs text-slate-500 font-mono">Top 8</span>
-          </div>
+        {/* Populasi jenis mesin: sewing & non sewing */}
+        <div className="space-y-6">
+          {[
+            { key: 'sewing', title: t('dash_type_pop_sewing'), data: sewingTypeData, color: 'from-emerald-600 to-teal-500', Icon: Boxes },
+            { key: 'nonsewing', title: t('dash_type_pop_ns'), data: nonSewingTypeData, color: 'from-sky-600 to-indigo-500', Icon: Wrench },
+          ].map(({ key, title, data, color, Icon }) => (
+            <div key={key} className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                  <Icon className="w-4 h-4 text-emerald-700" />
+                  <span>{title}</span>
+                </h3>
+                <span className="text-xs text-slate-500 font-mono">Top 8 · {data.total.toLocaleString()}</span>
+              </div>
 
-          <div className="space-y-3">
-            {machineTypeCounts.map(([name, count]) => {
-              const pct = ((count / (accessibleMachines.length || 1)) * 100).toFixed(1);
-              return (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => onOpenMachines({ typeName: name, status: 'ALL', site: 'ALL' })}
-                  className="block w-full text-left space-y-1 rounded-lg p-1 -m-1 hover:bg-slate-50 cursor-pointer"
-                >
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-800 font-medium truncate max-w-[280px]">{name}</span>
-                    <span className="font-mono font-bold text-slate-900">
-                      {count.toLocaleString()} ({pct}%)
-                    </span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-emerald-600 to-teal-500 rounded-full"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+              <div className="space-y-3">
+                {data.rows.length === 0 && (
+                  <div className="text-xs text-slate-400 py-2">{t('dash_type_empty')}</div>
+                )}
+                {data.rows.map(([name, count]) => {
+                  const pct = ((count / (data.total || 1)) * 100).toFixed(1);
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() =>
+                        key === 'sewing'
+                          ? onOpenMachines({ typeName: name, status: 'ALL', site: 'ALL' })
+                          : onOpenNonSewing?.('')
+                      }
+                      className="block w-full text-left space-y-1 rounded-lg p-1 -m-1 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-800 font-medium truncate max-w-[280px]">{name}</span>
+                        <span className="font-mono font-bold text-slate-900">
+                          {count.toLocaleString()} ({pct}%)
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={`h-full bg-gradient-to-r ${color} rounded-full`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Status Distribution & Recent Moves */}
@@ -644,7 +652,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                       <div className="text-right shrink-0 space-y-0.5">
                         <div className="text-[11px] font-mono text-slate-600 dark:text-slate-400 font-semibold">
-                          {formatWibTimestamp(mov.timestamp, language)}
+                          {formatDateTime(mov.timestamp, { seconds: true, lang: language })}
                         </div>
                         {mov.movedBy && (
                           <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate max-w-[90px]">

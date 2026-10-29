@@ -9,10 +9,8 @@ import {
   ClipboardCheck,
   History,
   FileText,
-  Users,
   ShieldAlert,
   QrCode,
-  Zap,
   Languages,
   KeyRound,
   LogOut,
@@ -20,6 +18,7 @@ import {
   ChevronRight,
   X,
   Compass,
+  Wrench,
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { makeT } from '../services/translations';
@@ -29,7 +28,7 @@ interface SidebarProps {
   activeTab: string;
   onSelectTab: (tab: string) => void;
   onOpenScanner: () => void;
-  onOpenBenchmark: () => void;
+  onOpenBenchmark?: () => void;
   onOpenChangePassword: () => void;
   onOpenLogout?: () => void;
   isOpenMobile?: boolean;
@@ -40,7 +39,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   onSelectTab,
   onOpenScanner,
-  onOpenBenchmark,
   onOpenChangePassword,
   onOpenLogout,
   isOpenMobile = false,
@@ -68,10 +66,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const navItems = [
-    { id: 'home', label: t('home'), icon: LayoutGrid, show: true, badge: 'Home' },
-    { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard, show: true, badge: 'Live' },
-    { id: 'machines', label: t('shell_hdr_machines'), icon: Boxes, show: true, badge: '5.7k' },
-    { id: 'rackmap', label: t('shell_hdr_rackmap'), icon: Grid, show: canUseRackMap, badge: 'WH2' },
+    { id: 'home', label: t('home'), icon: LayoutGrid, show: true },
+    { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard, show: true },
+    { id: 'machines', label: t('shell_hdr_machines'), icon: Boxes, show: true },
+    { id: 'nonsewing', label: t('ns_title'), icon: Wrench, show: true },
+    { id: 'rackmap', label: t('shell_hdr_rackmap'), icon: Grid, show: canUseRackMap },
     {
       id: 'move',
       label: t('shell_hdr_move'),
@@ -95,20 +94,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: t('hist_title'),
       icon: History,
       show: true,
-      badge: 'Live',
     },
     {
       id: 'reports',
       label: t('reports'),
       icon: FileText,
       show: canPerformAction('REPORTS'),
-    },
-    {
-      id: 'users',
-      label: t('shell_hdr_users'),
-      icon: Users,
-      show: canAddUser,
-      badge: 'Admin',
     },
     {
       id: 'admin',
@@ -216,11 +207,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Bagian Bawah: Profile Card, Quick Tools & Logout */}
       <div className="space-y-3 pt-4 border-t border-[#1d477c]/60 mt-4">
         {/* Quick Tools Row (Bahasa ID/EN) */}
-        <div className="text-xs">
-         <button
+        <div className="grid grid-cols-1 gap-2 text-xs">
+          <button
             type="button"
             onClick={() => setLanguage(language === 'id' ? 'en' : 'id')}
-            className="w-full p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
+            className="p-2 rounded-xl flex items-center justify-center gap-1.5 text-[11px] font-semibold border border-[#285791]/60 bg-[#0f3460]/50 hover:bg-[#184882]/70 text-[#cfe6ff] transition-all cursor-pointer shadow-2xs"
             title={t('shell_lang_title')}
           >
             <Languages className="w-3.5 h-3.5 text-[#7fb2e8]" />
@@ -245,9 +236,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center gap-1">
                   <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-[#ffd23f]/20 text-[#ffd23f] font-semibold uppercase">
                     {currentUser?.role}
-                  </span>
-                  <span className="text-[9px] text-[#cfe6ff]/60 font-mono truncate">
-                    ({currentUser?.username})
                   </span>
                 </div>
               </div>

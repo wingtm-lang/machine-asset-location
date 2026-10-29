@@ -7,7 +7,6 @@ import { Sidebar } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
 import { HomeView } from './views/HomeView';
 import { RackMapView } from './views/RackMapView';
-import { UserManagementView } from './views/UserManagementView';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { LogoutModal } from './components/LogoutModal';
 import { ScannerModal } from './components/ScannerModal';
@@ -16,6 +15,7 @@ import { SpeedBenchmarkModal } from './components/SpeedBenchmarkModal';
 import { DashboardView } from './views/DashboardView';
 import { MachinesListView } from './views/MachinesListView';
 import { MoveView } from './views/MoveView';
+import { NonSewingView } from './views/NonSewingView';
 import { TransfersView } from './views/TransfersView';
 import { OpnameView } from './views/OpnameView';
 import { HistoryView } from './views/HistoryView';
@@ -133,6 +133,15 @@ const MainAppInner: React.FC = () => {
   const handleOpenMachinesFiltered = (filter: MachineListFilter) => {
     setMachinesFilter(filter);
     setActiveTab('machines');
+  };
+
+  const [nsSite, setNsSite] = useState('');
+  useEffect(() => {
+    if (activeTab !== 'nonsewing') setNsSite('');
+  }, [activeTab]);
+  const handleOpenNonSewing = (site: string) => {
+    setNsSite(site);
+    setActiveTab('nonsewing');
   };
 
   const handleOpenDetail = (machine: Machine) => {
@@ -264,13 +273,13 @@ const MainAppInner: React.FC = () => {
         )}
 
         {/* Modul 3: Kelola Pengguna (Dengan Guard canAddUser / Admin Master) */}
-        {activeTab === 'users' && <UserManagementView />}
 
         {/* Modul Pendukung Lainnya jika dibuka melalui aksi */}
         {activeTab === 'dashboard' && (
           <DashboardView
             onNavigateTab={setActiveTab}
             onOpenMachines={handleOpenMachinesFiltered}
+            onOpenNonSewing={handleOpenNonSewing}
             onSelectMachine={handleOpenDetail}
             onOpenScanner={() => setIsScannerOpen(true)}
           />
@@ -286,6 +295,8 @@ const MainAppInner: React.FC = () => {
             onTransferBatch={handleTransferBatch}
           />
         )}
+
+        {activeTab === 'nonsewing' && <NonSewingView key={nsSite} initialSite={nsSite} />}
 
         {activeTab === 'move' && canPerformAction('MOVE') && (
           <MoveView
@@ -320,7 +331,7 @@ const MainAppInner: React.FC = () => {
           />
         )}
 
-        {/* Modul: Laporan Harian (Dengan Guard canPerformAction('REPORTS')) */}
+        {/* Modul: Laporan Mingguan (Dengan Guard canPerformAction('REPORTS')) */}
         {activeTab === 'reports' && (
           canPerformAction('REPORTS') ? (
             <ReportsView />
