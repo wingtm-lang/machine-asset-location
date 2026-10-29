@@ -11,6 +11,10 @@ interface Props {
   localName: string;
   koreanName: string;
   manufacturer: string;
+  /** Kategori mesin; menentukan daftar jenis yang ditawarkan. Default SEWING. */
+  category?: 'SEWING' | 'NON_SEWING';
+  /** Daftar mesin untuk menghitung dampak perubahan (default: mesin sewing di cache). */
+  pool?: Array<{ standard_machine_name: string | null; manufacturer: string | null }>;
   onClose: () => void;
   /** Dipanggil setelah berhasil disimpan dan data sudah diminta sinkron ulang. */
   onSaved: () => void;
@@ -23,7 +27,7 @@ const inputCls =
   'focus:outline-none focus:ring-2 focus:ring-emerald-600';
 
 export const EditMachineNamesModal: React.FC<Props> = ({
-  assetCode, standardName, localName, koreanName, manufacturer, onClose, onSaved,
+  assetCode, standardName, localName, koreanName, manufacturer, category = 'SEWING', pool, onClose, onSaved,
 }) => {
   const { language } = useAuth();
   const t = makeT(language);
@@ -33,6 +37,7 @@ export const EditMachineNamesModal: React.FC<Props> = ({
   const [local, setLocal] = useState(localName);
   const [kr, setKr] = useState(koreanName);
   const [brand, setBrand] = useState(manufacturer);
+  const [nameScope, setNameScope] = useState<'ONE' | 'ALL'>('ONE');
   const [brandScope, setBrandScope] = useState<'ONE' | 'TYPE' | 'ALL'>('ONE');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -43,12 +48,21 @@ export const EditMachineNamesModal: React.FC<Props> = ({
       const { data } = await supabase
         .from('machine_types')
         .select('standard_name, local_name')
-        .eq('category', 'SEWING')
+        .eq('category', category)
         .order('standard_name');
       if (alive) setTypes((data ?? []) as unknown as TypeRow[]);
     })();
     return () => { alive = false; };
   }, []);
+
+  const poolList = useMemo(
+    () =>
+      pool ??
+      storageService
+        .getAllMachines()
+        .map((x) => ({ standard_machine_name: x.standardMachineName || null, manufacturer: x.manufacturer || null })),
+    [pool]
+  );
 
   const existing = useMemo(
     () => types.find((x) => x.standard_name === std.trim()) ?? null,
@@ -64,21 +78,27 @@ export const EditMachineNamesModal: React.FC<Props> = ({
   const localWillChange =
     !!existing && local.trim() !== '' && local.trim() !== (existing.local_name ?? '');
   const affected = useMemo(
-    () => (existing ? storageService.getAllMachines().filter((m) => m.standardMachineName === existing.standard_name).length : 0),
-    [existing]
+    () => (existing ? poolList.filter((m) => m.standard_machine_name === existing.standard_name).length : 0),
+    [existing, poolList]
+  );
+
+  // Perubahan nama standar / nama Korea: bisa untuk mesin ini saja atau semua mesin yang bernama standar sama.
+  const nameChanged = std.trim() !== standardName.trim() || kr.trim() !== koreanName.trim();
+  const sameNameCount = useMemo(
+    () => poolList.filter((x) => (x.standard_machine_name || '') === standardName).length,
+    [poolList, standardName]
   );
 
   const brandChanged = brand.trim() !== '' && manufacturer.trim() !== '' && brand.trim() !== manufacturer.trim();
   const brandCountAll = useMemo(
-    () => storageService.getAllMachines().filter((m) => (m.manufacturer || '') === manufacturer).length,
-    [manufacturer]
+    () => poolList.filter((m) => (m.manufacturer || '') === manufacturer).length,
+    [manufacturer, poolList]
   );
   const brandCountType = useMemo(
     () =>
-      storageService
-        .getAllMachines()
-        .filter((m) => (m.manufacturer || '') === manufacturer && (m.standardMachineName || '') === standardName).length,
-    [manufacturer, standardName]
+      poolList.filter((m) => (m.manufacturer || '') === manufacturer && (m.standard_machine_name || '') === standardName)
+        .length,
+    [manufacturer, standardName, poolList]
   );
 
   const submit = async (e: React.FormEvent) => {
@@ -92,6 +112,7 @@ export const EditMachineNamesModal: React.FC<Props> = ({
       p_item: kr || null,
       p_manufacturer: brand || null,
       p_manufacturer_scope: brandChanged ? brandScope : 'ONE',
+      p_name_scope: nameChanged && sameNameCount > 1 ? nameScope : 'ONE',
     });
     setBusy(false);
     if (err) return setError(localizeMessage(err.message, language));
@@ -140,6 +161,20 @@ export const EditMachineNamesModal: React.FC<Props> = ({
             <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">{t('en_korean')}</span>
             <input className={inputCls} value={kr} onChange={(e) => setKr(e.target.value)} />
           </label>
+
+          {nameChanged && sameNameCount > 1 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-xs px-3 py-2 space-y-1.5">
+              <div className="font-bold">{t('en_name_scope')}</div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="radio" name="name-scope" className="mt-0.5" checked={nameScope === 'ONE'} onChange={() => setNameScope('ONE')} />
+                <span>{t('en_name_one')}</span>
+              </label>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="radio" name="name-scope" className="mt-0.5" checked={nameScope === 'ALL'} onChange={() => setNameScope('ALL')} />
+                <span>{t('en_name_all', { type: standardName, n: sameNameCount })}</span>
+              </label>
+            </div>
+          )}
 
           <label className="block">
             <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">{t('en_brand')}</span>

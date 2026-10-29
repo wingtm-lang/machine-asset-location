@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Layers } from 'lucide-react';
+import { X, Layers, Pencil } from 'lucide-react';
 import { makeT } from '../services/translations';
 import { useAuth } from '../services/authContext';
 
@@ -24,6 +24,8 @@ interface Props {
   localName: string | null;
   onClose: () => void;
   onMove: () => void;
+  /** Hanya diisi untuk Admin Master. */
+  onEditNames?: () => void;
 }
 
 const statusCls: Record<string, string> = {
@@ -34,7 +36,7 @@ const statusCls: Record<string, string> = {
   IN_TRANSIT: 'bg-sky-50 text-sky-700 border-sky-200',
 };
 
-export const NonSewingDetailModal: React.FC<Props> = ({ machine: m, localName, onClose, onMove }) => {
+export const NonSewingDetailModal: React.FC<Props> = ({ machine: m, localName, onClose, onMove, onEditNames }) => {
   const { language } = useAuth();
   const t = makeT(language);
   const movable = m.status !== 'SOLD' && m.status !== 'IN_TRANSIT';
@@ -90,6 +92,18 @@ export const NonSewingDetailModal: React.FC<Props> = ({ machine: m, localName, o
           </div>
 
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            {onEditNames && (
+              <div className="flex justify-end -mt-1 mb-1">
+                <button
+                  type="button"
+                  onClick={onEditNames}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 bg-white text-[10px] font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                >
+                  <Pencil className="w-3 h-3" />
+                  {t('en_btn')}
+                </button>
+              </div>
+            )}
             <Row label={t('md_std_name')}>{m.standard_machine_name}</Row>
             <Row label={t('md_local_name')}>{localName}</Row>
             <Row label={t('md_korean')}>{m.item}</Row>

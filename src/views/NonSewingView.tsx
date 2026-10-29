@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Wrench, Plus, Search, RefreshCw, MapPin, X, Layers, Tags, FileSpreadsheet, Eye, CheckSquare, Square } from 'lucide-react';
 import { NonSewingDetailModal } from '../components/NonSewingDetailModal';
+import { EditMachineNamesModal } from '../components/EditMachineNamesModal';
 import { ImportNonSewingModal } from '../components/ImportNonSewingModal';
 import { BulkMoveNonSewingModal } from '../components/BulkMoveNonSewingModal';
 import { makeT, localizeMessage, localeOf } from '../services/translations';
@@ -106,6 +107,7 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [detail, setDetail] = useState<NsMachine | null>(null);
+  const [editing, setEditing] = useState<NsMachine | null>(null);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -685,10 +687,29 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
           machine={detail}
           localName={types.find((x) => x.standard_name === detail.standard_machine_name)?.local_name ?? null}
           onClose={() => setDetail(null)}
+          onEditNames={isAdminMaster ? () => setEditing(detail) : undefined}
           onMove={() => {
             const m = detail;
             setDetail(null);
             openMove(m);
+          }}
+        />
+      )}
+
+      {editing && (
+        <EditMachineNamesModal
+          assetCode={editing.asset_code}
+          standardName={editing.standard_machine_name || ''}
+          localName={types.find((x) => x.standard_name === editing.standard_machine_name)?.local_name ?? ''}
+          koreanName={editing.item || ''}
+          manufacturer={editing.manufacturer || ''}
+          category="NON_SEWING"
+          pool={machines}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            setDetail(null);
+            void load();
           }}
         />
       )}
