@@ -35,6 +35,7 @@ import { useAuth } from '../services/authContext';
 import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
 import { soundService } from '../services/sound';
+import { supabase } from '../services/supabase';
 
 import { Location, Machine, OpnameItem, OpnameResult, SiteId } from '../types';
 import { getMachineLabel } from '../utils/machineName';
@@ -110,9 +111,76 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     return 'PW1';
   });
 
+  // Area & mesin non sewing tidak ada di cache sewing (storageService); dimuat terpisah agar ikut dihitung di opname.
+  const [nsLocations, setNsLocations] = useState<Location[]>([]);
+  const [nsMachines, setNsMachines] = useState<Machine[]>([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const locs = await supabase
+          .from('locations')
+          .select('location_id, site_id, type, display_name, active, sort_order')
+          .eq('type', 'NS_AREA')
+          .order('sort_order')
+          .order('location_id');
+        const rows: Array<Record<string, any>> = [];
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase
+            .from('machines')
+            .select('asset_code, barcode, item, standard_machine_name, serial, manufacturer, model, status, site_id, location_id')
+            .eq('category', 'NON_SEWING')
+            .order('id')
+            .range(from, from + 999);
+          if (error) break; // SQL non sewing belum terpasang: opname sewing tetap normal
+          rows.push(...((data ?? []) as Array<Record<string, any>>));
+          if (!data || data.length < 1000) break;
+        }
+        if (!alive) return;
+        setNsLocations(
+          ((locs.data ?? []) as Array<Record<string, any>>).map(
+            (r) =>
+              ({
+                locationId: String(r.location_id),
+                siteId: String(r.site_id),
+                type: 'NS_AREA',
+                displayName: String(r.display_name ?? r.location_id),
+                active: Boolean(r.active),
+                sortOrder: Number(r.sort_order ?? 900),
+              }) as unknown as Location
+          )
+        );
+        setNsMachines(
+          rows.map(
+            (r) =>
+              ({
+                assetCode: String(r.asset_code),
+                barcode: String(r.barcode),
+                item: String(r.item ?? ''),
+                standardMachineName: String(r.standard_machine_name ?? ''),
+                serial: String(r.serial ?? ''),
+                manufacturer: String(r.manufacturer ?? ''),
+                model: String(r.model ?? ''),
+                status: String(r.status),
+                siteId: String(r.site_id),
+                locationId: r.location_id ? String(r.location_id) : '',
+              }) as unknown as Machine
+          )
+        );
+      } catch {
+        /* diabaikan */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const availableLocations = useMemo(() => {
-    return storageService.getLocations(selectedSiteId).filter((l) => l.active);
-  }, [selectedSiteId]);
+    const sewing = storageService.getLocations(selectedSiteId).filter((l) => l.active);
+    const ns = nsLocations.filter((l) => l.siteId === selectedSiteId && l.active);
+    return [...sewing, ...ns];
+  }, [selectedSiteId, nsLocations]);
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
 
@@ -144,8 +212,11 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
   // Expected machines registered in selected location
   const expectedMachines = useMemo(() => {
     if (!selectedLocationId) return [];
-    return storageService.getMachinesAtLocation(selectedLocationId);
-  }, [selectedLocationId]);
+    return [
+      ...storageService.getMachinesAtLocation(selectedLocationId),
+      ...nsMachines.filter((m) => m.locationId === selectedLocationId),
+    ];
+  }, [selectedLocationId, nsMachines]);
 
   // Live Session State
   const [activeSession, setActiveSession] = useState<ServerOpnameSession | null>(null);
@@ -340,7 +411,11 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
       return;
     }
 
-    const { machine } = storageService.getMachineByCode(clean);
+    let machine: Machine | null = storageService.getMachineByCode(clean).machine;
+    if (!machine) {
+      const up = clean.toUpperCase();
+      machine = nsMachines.find((m) => m.barcode === clean || m.assetCode === up) ?? null;
+    }
 
     let result: OpnameResult = 'UNKNOWN_BARCODE';
     let assetCode = clean;
