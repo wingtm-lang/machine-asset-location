@@ -14,6 +14,7 @@ import jsQR from 'jsqr';
 import { useAuth } from '../services/authContext';
 import { getTranslation, makeT } from '../services/translations';
 import { storageService } from '../services/storage';
+import { supabase } from '../services/supabase';
 import { soundService } from '../services/sound';
 import { Machine } from '../types';
 import { getMachineLabel } from '../utils/machineName';
@@ -23,6 +24,8 @@ interface ScannerModalProps {
   onClose: () => void;
   onSelectMachine?: (machine: Machine) => void;
   onQuickMove?: (machine: Machine) => void;
+  /** Dipanggil untuk mesin non sewing hasil scan: buka halaman Mesin Non Sewing dengan detail mesin itu. */
+  onOpenNonSewing?: (assetCode: string) => void;
   /**
    * Mode "tangkap hasil" (dipakai WH2 Rack Map): bila diisi, begitu barcode terbaca dan mesinnya ditemukan,
    * modal langsung menutup dan memanggil onCapture(kode, mesin). Kartu detail mesin tidak ditampilkan.
@@ -49,6 +52,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   onClose,
   onSelectMachine,
   onQuickMove,
+  onOpenNonSewing,
   onCapture,
   captureLabel,
   initialMode,
@@ -66,6 +70,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   const [mode, setMode] = useState<'physical' | 'camera'>('physical');
   const [inputValue, setInputValue] = useState('');
   const [scannedMachine, setScannedMachine] = useState<Machine | null>(null);
+  const [scannedIsNs, setScannedIsNs] = useState(false);
   const [searchLatency, setSearchLatency] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -193,6 +198,45 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     animationFrameId.current = requestAnimationFrame(tickVideoScan);
   };
 
+  // Mesin non sewing tidak ada di cache storageService, jadi dicari langsung ke database.
+  const lookupNonSewing = async (code: string): Promise<Machine | null> => {
+    const clean = code.trim();
+    if (!clean) return null;
+    const safe = clean.replace(/[,()"\\]/g, '');
+    const { data, error } = await supabase
+      .from('machines')
+      .select('asset_code, barcode, item, standard_machine_name, serial, manufacturer, model, status, site_id, location_id')
+      .eq('category', 'NON_SEWING')
+      .or(`barcode.eq.${safe},asset_code.eq.${safe.toUpperCase()},serial.eq.${safe}`)
+      .limit(1);
+    if (error || !data || data.length === 0) return null;
+    const r: any = data[0];
+    if (!canAccessSite(r.site_id)) return null;
+    let localName = '';
+    if (r.standard_machine_name) {
+      const { data: tp } = await supabase
+        .from('machine_types')
+        .select('local_name')
+        .eq('category', 'NON_SEWING')
+        .eq('standard_name', r.standard_machine_name)
+        .maybeSingle();
+      localName = (tp as any)?.local_name ?? '';
+    }
+    return {
+      assetCode: r.asset_code,
+      barcode: r.barcode ?? '',
+      item: r.item ?? '',
+      standardMachineName: r.standard_machine_name ?? '',
+      localName,
+      serial: r.serial ?? '',
+      manufacturer: r.manufacturer ?? '',
+      model: r.model ?? '',
+      status: r.status,
+      siteId: r.site_id,
+      locationId: r.location_id ?? '',
+    } as unknown as Machine;
+  };
+
   // Common Scan Handler
   const handleScanSuccess = (scannedText: string) => {
     setErrorMessage(null);
@@ -236,12 +280,25 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     if (machine) {
       soundService.playSuccess();
       setScannedMachine(machine);
+      setScannedIsNs(false);
       setInputValue('');
-    } else {
-      soundService.playError();
-      setScannedMachine(null);
-      setErrorMessage(t('scn_err_not_found', { code: cleanCode }));
+      return;
     }
+
+    // Tidak ada di mesin sewing: cari di mesin non sewing.
+    void lookupNonSewing(cleanCode).then((ns) => {
+      if (ns) {
+        soundService.playSuccess();
+        setScannedMachine(ns);
+        setScannedIsNs(true);
+        setInputValue('');
+      } else {
+        soundService.playError();
+        setScannedMachine(null);
+        setScannedIsNs(false);
+        setErrorMessage(t('scn_err_not_found', { code: cleanCode }));
+      }
+    });
   };
 
   // Extracts 12-digit barcode or asset code if wrapped in URL or text
@@ -549,7 +606,20 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
 
               {/* Quick Actions Footer */}
               <div className="flex items-center gap-2 pt-1">
-                {onSelectMachine && (
+                {scannedIsNs && onOpenNonSewing && (
+                  <button
+                    onClick={() => {
+                      onOpenNonSewing(scannedMachine.assetCode);
+                      onClose();
+                    }}
+                    className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <span>{t('scn_open_ns')}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                {!scannedIsNs && onSelectMachine && (
                   <button
                     onClick={() => {
                       onSelectMachine(scannedMachine);
@@ -561,7 +631,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                   </button>
                 )}
 
-                {hasSiteAccess && !scannedMachine.pendingTransferId && onQuickMove && (
+                {!scannedIsNs && hasSiteAccess && !scannedMachine.pendingTransferId && onQuickMove && (
                   <button
                     onClick={() => {
                       onQuickMove(scannedMachine);

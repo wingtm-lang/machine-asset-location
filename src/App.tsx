@@ -136,8 +136,9 @@ const MainAppInner: React.FC = () => {
   };
 
   const [nsSite, setNsSite] = useState('');
+  const [nsFocus, setNsFocus] = useState('');
   useEffect(() => {
-    if (activeTab !== 'nonsewing') setNsSite('');
+    if (activeTab !== 'nonsewing') { setNsSite(''); setNsFocus(''); }
   }, [activeTab]);
   const handleOpenNonSewing = (site: string) => {
     setNsSite(site);
@@ -296,7 +297,7 @@ const MainAppInner: React.FC = () => {
           />
         )}
 
-        {activeTab === 'nonsewing' && <NonSewingView key={nsSite} initialSite={nsSite} />}
+        {activeTab === 'nonsewing' && <NonSewingView key={`${nsSite}|${nsFocus}`} initialSite={nsSite} focusCode={nsFocus} />}
 
         {activeTab === 'move' && canPerformAction('MOVE') && (
           <MoveView
@@ -379,6 +380,7 @@ const MainAppInner: React.FC = () => {
         onClose={() => setIsScannerOpen(false)}
         onSelectMachine={handleOpenDetail}
         onQuickMove={handleMoveSingle}
+        onOpenNonSewing={(code) => { setNsSite(''); setNsFocus(code); setActiveTab('nonsewing'); }}
       />
 
       {/* Speed Benchmark Modal */}

@@ -27,8 +27,9 @@ import {
 import { useAuth } from '../services/authContext';
 import { getTranslation, makeT, localeOf, localizeMessage } from '../services/translations';
 import { storageService } from '../services/storage';
+import { supabase } from '../services/supabase';
 import { soundService } from '../services/sound';
-import { Machine, Transfer, SiteId } from '../types';
+import { Machine, Transfer, SiteId, Location } from '../types';
 import { getMachineLabel } from '../utils/machineName';
 import { ScannerModal } from '../components/ScannerModal'; // sesuaikan path bila file ada di folder lain
 import { openSuratJalan } from '../services/suratJalan';
@@ -168,6 +169,79 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const t = makeT(language);
   const sites = storageService.getSites();
   const allMachines = storageService.getAllMachines();
+
+  // Mesin non sewing tidak ada di cache storageService: dimuat sendiri agar bisa discan, dikirim, dan diterima.
+  const [nsMachines, setNsMachines] = useState<Machine[]>([]);
+  const [nsAreas, setNsAreas] = useState<Location[]>([]);
+  const loadNs = async () => {
+    try {
+      const rows: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('machines')
+          .select('asset_code, barcode, item, standard_machine_name, serial, manufacturer, model, status, site_id, location_id, home_site_id, acq_date, notes')
+          .eq('category', 'NON_SEWING')
+          .order('id')
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...(data ?? []));
+        if (!data || data.length < 1000) break;
+      }
+      const [tp, lc] = await Promise.all([
+        supabase.from('machine_types').select('standard_name, local_name').eq('category', 'NON_SEWING'),
+        supabase.from('locations').select('location_id, site_id, type, display_name, sort_order').eq('type', 'NS_AREA').eq('active', true).order('sort_order').order('location_id'),
+      ]);
+      const localOf = new Map<string, string>(
+        ((tp.data ?? []) as any[]).filter((x) => x.local_name).map((x) => [x.standard_name, x.local_name])
+      );
+      setNsMachines(
+        rows
+          .filter((r) => r.site_id)
+          .map(
+            (r) =>
+              ({
+                assetCode: r.asset_code,
+                barcode: r.barcode ?? '',
+                item: r.item ?? '',
+                homeFactory: r.home_site_id ?? r.site_id,
+                acqDate: r.acq_date ?? '',
+                standardMachineName: r.standard_machine_name ?? '',
+                localName: localOf.get(r.standard_machine_name) || undefined,
+                serial: r.serial ?? '',
+                manufacturer: r.manufacturer ?? '',
+                model: r.model ?? '',
+                status: r.status,
+                locationId: r.location_id ?? '',
+                siteId: r.site_id,
+                updatedAt: '',
+                updatedBy: '',
+                notes: r.notes ?? undefined,
+              } as unknown as Machine)
+          )
+      );
+      setNsAreas(
+        ((lc.data ?? []) as any[]).map(
+          (l) =>
+            ({
+              locationId: l.location_id,
+              siteId: l.site_id,
+              type: l.type,
+              displayName: l.display_name,
+              active: true,
+              sortOrder: l.sort_order ?? 0,
+            } as unknown as Location)
+        )
+      );
+    } catch {
+      /* gagal memuat: mesin non sewing saja yang tidak bisa dipilih, mesin sewing tetap normal */
+    }
+  };
+  useEffect(() => {
+    void loadNs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const nsCodes = useMemo(() => new Set(nsMachines.map((m) => m.assetCode.toUpperCase())), [nsMachines]);
+  const isNsMachine = (m: { assetCode: string }) => nsCodes.has(m.assetCode.toUpperCase());
 
   const [activeTab, setActiveTab] = useState<'inbound' | 'outbound' | 'send_new'>(() => {
     return batchMachines && batchMachines.length > 0 ? 'send_new' : 'inbound';
@@ -320,8 +394,12 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   // Available destination locations when receiving
   const destinationLocations = useMemo(() => {
     if (!receivingTransfer) return [];
-    return storageService.getLocations(receivingTransfer.toSite).filter((l) => l.active);
-  }, [receivingTransfer]);
+    const site = receivingTransfer.toSite;
+    if (nsCodes.has(receivingTransfer.assetCode.toUpperCase())) {
+      return nsAreas.filter((l) => l.siteId === site);
+    }
+    return storageService.getLocations(site).filter((l) => l.active && String(l.type) !== 'NS_AREA');
+  }, [receivingTransfer, nsCodes, nsAreas]);
 
   // Validate a single machine query (Barcode / Asset Code / Serial)
   const validateMachineForTransfer = (
@@ -334,9 +412,18 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       return { valid: false, error: t('xf2_err_empty_code'), reason: 'EMPTY' };
     }
 
-    const { machine } = storageService.getMachineByCode(clean);
+    const up = clean.toUpperCase();
+    const machine =
+      storageService.getMachineByCode(clean).machine ??
+      nsMachines.find((m) => m.barcode === clean || m.assetCode.toUpperCase() === up || (m.serial && m.serial.toUpperCase() === up)) ??
+      null;
     if (!machine) {
       return { valid: false, error: t('xf2_err_not_found', { code: clean }), reason: 'NOT_FOUND' };
+    }
+
+    // Satu transfer hanya boleh berisi satu jenis: semua sewing atau semua non sewing.
+    if (currentList.length > 0 && isNsMachine(currentList[0]) !== isNsMachine(machine)) {
+      return { valid: false, error: t('xf3_err_mixed_kind', { code: machine.assetCode }), reason: 'MIXED_KIND' };
     }
 
     if (currentList.some((m) => m.assetCode.toUpperCase() === machine.assetCode.toUpperCase())) {
@@ -549,6 +636,8 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         }
       }
 
+      if (sent.length > 0) void loadNs();
+
       // Pesan hasil: satu transfer -> pesan server apa adanya; multi-site -> semua nomor TRF per site.
       let message: string;
       if (groups.length === 1) {
@@ -621,6 +710,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
 
       if (res.success) {
         soundService.playSuccess();
+        void loadNs();
         setFeedback({ type: 'success', message: localizeMessage(res.message, language) });
         setReceivingTransfer(null);
         setReceiveTargetLocationId('');

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search, MapPin, X, Layers, Tags, FileSpreadsheet, Eye, CheckSquare, Square, Download, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { NonSewingDetailModal } from '../components/NonSewingDetailModal';
@@ -74,7 +74,7 @@ const Field: React.FC<{ label: string; required?: boolean; children: React.React
   </label>
 );
 
-export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite }) => {
+export const NonSewingView: React.FC<{ initialSite?: string; focusCode?: string }> = ({ initialSite, focusCode }) => {
   const { currentUser, language, canAccessSite } = useAuth();
   const t = makeT(language);
 
@@ -169,6 +169,18 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Dibuka dari scanner utama: langsung tampilkan detail mesin yang di-scan.
+  const focusDone = useRef(false);
+  useEffect(() => {
+    if (!focusCode || focusDone.current || machines.length === 0) return;
+    const up = focusCode.toUpperCase();
+    const m = machines.find((x) => x.asset_code === up || x.barcode === focusCode);
+    if (m) {
+      focusDone.current = true;
+      setDetail(m);
+    }
+  }, [focusCode, machines]);
 
 
   const nameOf = useCallback(
