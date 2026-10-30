@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Wrench, Plus, Search, RefreshCw, MapPin, X, Layers, Tags, FileSpreadsheet, Eye, CheckSquare, Square } from 'lucide-react';
+import { Plus, Search, MapPin, X, Layers, Tags, FileSpreadsheet, Eye, CheckSquare, Square, Download, AlertCircle } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { NonSewingDetailModal } from '../components/NonSewingDetailModal';
 import { EditMachineNamesModal } from '../components/EditMachineNamesModal';
 import { ImportNonSewingModal } from '../components/ImportNonSewingModal';
@@ -9,6 +10,7 @@ import { useAuth } from '../services/authContext';
 import { storageService } from '../services/storage';
 import { sortSites } from '../services/siteOrder';
 import { supabase } from '../services/supabase';
+import { getMachineLabel } from '../utils/machineName';
 
 interface NsMachine {
   id: number;
@@ -44,15 +46,6 @@ const btnPrimary =
 const btnGhost =
   'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-300 dark:border-slate-700 ' +
   'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer';
-
-const statusCls: Record<string, string> = {
-  ACTIVE: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
-  BROKEN: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800',
-  IN_REPAIR: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
-  LOANED: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800',
-  SOLD: 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
-  IN_TRANSIT: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800',
-};
 
 const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs" onMouseDown={onClose}>
@@ -97,8 +90,10 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
 
   const [q, setQ] = useState('');
   const [fSite, setFSite] = useState(initialSite ?? '');
-  const [fType, setFType] = useState('');
-  const [fStatus, setFStatus] = useState('');
+  const [fLoc, setFLoc] = useState('');
+  const [fName, setFName] = useState('');
+  const [fBrand, setFBrand] = useState('');
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
   const [page, setPage] = useState(1);
 
   const [modal, setModal] = useState<'add' | 'type' | 'area' | null>(null);
@@ -176,19 +171,85 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
   }, [load]);
 
 
-  const filtered = useMemo(() => {
+  const nameOf = useCallback(
+    (m: NsMachine) =>
+      getMachineLabel({
+        localName: types.find((x) => x.standard_name === m.standard_machine_name)?.local_name ?? undefined,
+        standardMachineName: m.standard_machine_name ?? undefined,
+        item: m.item ?? undefined,
+      }).primary,
+    [types]
+  );
+
+  // Hasil semua filter kecuali Lokasi (dipakai untuk angka di dropdown Lokasi)
+  const beforeLocation = useMemo(() => {
     const s = q.trim().toLowerCase();
     return machines.filter((m) => {
       if (fSite && m.site_id !== fSite) return false;
-      if (fType && m.standard_machine_name !== fType) return false;
-      if (fStatus && m.status !== fStatus) return false;
+      if (fName && nameOf(m) !== fName) return false;
+      if (fBrand && m.manufacturer !== fBrand) return false;
+      if (onlyUnassigned && !(m.location_id ?? '').includes('UNASSIGNED')) return false;
       if (!s) return true;
-      return [m.asset_code, m.barcode, m.item, m.serial, m.model, m.manufacturer, m.standard_machine_name]
+      return [m.asset_code, m.barcode, m.item, m.serial, m.model, m.manufacturer, m.standard_machine_name, nameOf(m), m.location_id]
         .some((v) => (v ?? '').toLowerCase().includes(s));
     });
-  }, [machines, q, fSite, fType, fStatus]);
+  }, [machines, q, fSite, fName, fBrand, onlyUnassigned, nameOf]);
 
-  useEffect(() => setPage(1), [q, fSite, fType, fStatus]);
+  const filtered = useMemo(
+    () => (fLoc ? beforeLocation.filter((m) => m.location_id === fLoc) : beforeLocation),
+    [beforeLocation, fLoc]
+  );
+
+  const locCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const m of beforeLocation) c.set(m.location_id ?? '', (c.get(m.location_id ?? '') ?? 0) + 1);
+    return c;
+  }, [beforeLocation]);
+
+  const locOptions = useMemo(
+    () => (fSite ? locs.filter((l) => l.site_id === fSite && l.type !== 'RACK_SLOT') : []),
+    [locs, fSite]
+  );
+
+  const nameOptions = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const m of machines) {
+      if (fSite && m.site_id !== fSite) continue;
+      const n = nameOf(m);
+      c.set(n, (c.get(n) ?? 0) + 1);
+    }
+    return Array.from(c.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [machines, fSite, nameOf]);
+
+  const brandOptions = useMemo(
+    () => Array.from(new Set(machines.map((m) => m.manufacturer).filter(Boolean) as string[])).sort(),
+    [machines]
+  );
+
+  const handleExport = () => {
+    const rows = filtered.map((m) => ({
+      'Asset Code': m.asset_code,
+      'Barcode (12-Digit)': m.barcode,
+      'Standard Machine Name': m.standard_machine_name ?? '',
+      [t('ml_x_local_name')]: types.find((x) => x.standard_name === m.standard_machine_name)?.local_name ?? '',
+      'Item (Korea)': m.item ?? '',
+      Manufacturer: m.manufacturer ?? '',
+      Model: m.model ?? '',
+      Serial: m.serial ?? '',
+      Status: m.status,
+      'Current Site': m.site_id,
+      'Current Location': m.location_id ?? '',
+      'Home Factory': m.home_site_id ?? '',
+      'Acquisition Date': m.acq_date ?? '',
+      Notes: m.notes ?? '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'NonSewing');
+    XLSX.writeFile(wb, `PT_WINNERS_NonSewing_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  useEffect(() => setPage(1), [q, fSite, fLoc, fName, fBrand, onlyUnassigned]);
 
   const isSelectable = (m: NsMachine) => m.status !== 'SOLD' && m.status !== 'IN_TRANSIT';
   // buang pilihan yang sudah tidak ada setelah data dimuat ulang
@@ -214,7 +275,7 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
     });
   const selectedMachines = machines.filter((m) => sel.has(m.asset_code));
 
-  const locOptions = (site: string) => {
+  const getSiteLocGroups = (site: string) => {
     const list = locs.filter((l) => l.site_id === site);
     return {
       area: list.filter((l) => l.type === 'NS_AREA'),
@@ -223,7 +284,7 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
   };
 
   const locSelect = (site: string, value: string, onChange: (v: string) => void) => {
-    const { area, general } = locOptions(site);
+    const { area, general } = getSiteLocGroups(site);
     return (
       <select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)} disabled={!site}>
         <option value="">{t('ns_pick_location')}</option>
@@ -360,66 +421,124 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
         </div>
       )}
 
-      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 shadow-xs">
-        <div className="flex flex-wrap items-center gap-2 justify-between">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 flex items-center justify-center shrink-0">
-              <Wrench className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">{t('ns_title')}</h2>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('ns_count', { n: filtered.length })}</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={btnGhost} onClick={() => void load()} disabled={loading}>
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              {t('ns_refresh')}
-            </button>
-            {isAdminMaster && (
-              <>
-                <button type="button" className={btnGhost} onClick={() => setImportOpen(true)}>
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  {t('ns_btn_import')}
-                </button>
-                <button type="button" className={btnGhost} onClick={() => { setFormError(''); setModal('type'); }}>
-                  <Tags className="w-3.5 h-3.5" />
-                  {t('ns_btn_type')}
-                </button>
-                <button type="button" className={btnGhost} onClick={() => { setFormError(''); setAreaForm({ site: '', code: '', name: '' }); setModal('area'); }}>
-                  <MapPin className="w-3.5 h-3.5" />
-                  {t('ns_btn_area')}
-                </button>
-              </>
-            )}
-            {isAdminMaster && (
-              <button type="button" className={btnPrimary} onClick={openAdd}>
-                <Plus className="w-3.5 h-3.5" />
-                {t('ns_btn_add')}
+      {isAdminMaster && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" className={btnGhost} onClick={() => setImportOpen(true)}>
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            {t('ns_btn_import')}
+          </button>
+          <button type="button" className={btnGhost} onClick={() => { setFormError(''); setModal('type'); }}>
+            <Tags className="w-3.5 h-3.5" />
+            {t('ns_btn_type')}
+          </button>
+          <button type="button" className={btnGhost} onClick={() => { setFormError(''); setAreaForm({ site: '', code: '', name: '' }); setModal('area'); }}>
+            <MapPin className="w-3.5 h-3.5" />
+            {t('ns_btn_area')}
+          </button>
+          <button type="button" className={btnPrimary} onClick={openAdd}>
+            <Plus className="w-3.5 h-3.5" />
+            {t('ns_btn_add')}
+          </button>
+        </div>
+      )}
+
+      {/* Pencarian & filter (tata letak sama dengan Mesin Sewing) */}
+      <div className="p-5 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={t('ml_search_ph3')}
+              className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 font-mono transition-colors shadow-xs"
+            />
+            {q && (
+              <button
+                type="button"
+                onClick={() => setQ('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                ✕
               </button>
             )}
           </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={handleExport}
+              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title={t('ml_export_title')}
+            >
+              <Download className="w-4 h-4 text-emerald-600" />
+              <span className="hidden md:inline">{t('export_excel')}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-2">
-          <div className="relative sm:col-span-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input className={`${inputCls} pl-9`} placeholder={t('ns_search_ph')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-3 border-t border-slate-100 text-xs">
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{t('ml_site_label')}</label>
+            <select
+              className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500"
+              value={fSite}
+              onChange={(e) => { setFSite(e.target.value); setFLoc(''); }}
+            >
+              <option value="">{t('ml_all_sites')}</option>
+              {sites.map((s) => <option key={s.siteId} value={s.siteId}>{s.siteId} - {s.name}</option>)}
+            </select>
           </div>
-          <select className={inputCls} value={fSite} onChange={(e) => setFSite(e.target.value)}>
-            <option value="">{t('ns_all_sites')}</option>
-            {sites.map((s) => <option key={s.siteId} value={s.siteId}>{s.siteId}</option>)}
-          </select>
-          <select className={inputCls} value={fType} onChange={(e) => setFType(e.target.value)}>
-            <option value="">{t('ns_all_types')}</option>
-            {types.map((x) => <option key={x.standard_name} value={x.standard_name}>{typeLabel(x.standard_name)}</option>)}
-          </select>
-          <select className={inputCls} value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
-            <option value="">{t('ns_all_status')}</option>
-            {['ACTIVE', 'BROKEN', 'IN_REPAIR', 'LOANED', 'SOLD', 'IN_TRANSIT'].map((s) => (
-              <option key={s} value={s}>{t(`ns_st_${s}`)}</option>
-            ))}
-          </select>
+
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{t('ml_loc_label')}</label>
+            <select
+              className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
+              value={fLoc}
+              disabled={!fSite}
+              onChange={(e) => { setFLoc(e.target.value); if (e.target.value) setOnlyUnassigned(false); }}
+              aria-label={t('ml_loc_aria')}
+            >
+              <option value="">{fSite ? t('ml_all_locs') : t('ml_pick_site')}</option>
+              {locOptions.map((l) => (
+                <option key={l.location_id} value={l.location_id}>
+                  {l.display_name} ({(locCounts.get(l.location_id) ?? 0).toLocaleString()})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{t('ml_name_label')}</label>
+            <select className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500" value={fName} onChange={(e) => setFName(e.target.value)}>
+              <option value="">{t('ml_all_names')}</option>
+              {nameOptions.map(([name, n]) => <option key={name} value={name}>{name} ({n.toLocaleString()})</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{t('ml_mfr_label')}</label>
+            <select className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500" value={fBrand} onChange={(e) => setFBrand(e.target.value)}>
+              <option value="">{t('ml_all_mfr')}</option>
+              {brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() => { setOnlyUnassigned(!onlyUnassigned); if (!onlyUnassigned) setFLoc(''); }}
+              className={`w-full py-1.5 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                onlyUnassigned
+                  ? 'bg-amber-100/80 border-amber-300 text-amber-900 font-extrabold'
+                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+              <span>{t('ml_only_unassigned')}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -445,95 +564,118 @@ export const NonSewingView: React.FC<{ initialSite?: string }> = ({ initialSite 
         )}
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-800/60 text-left text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                <th className="px-3 py-2.5 w-8 text-center">
+            <thead className="bg-slate-50/80 text-slate-600 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
+              <tr>
+                <th className="p-3.5 w-10 text-center">
                   <button
                     type="button"
                     onClick={toggleAll}
                     title={t('bm_select_all', { n: selectableFiltered.length })}
-                    className="p-1 cursor-pointer"
+                    className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
                   >
                     {allSelected ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                   </button>
                 </th>
-                <th className="px-3 py-2.5">{t('ns_col_asset')}</th>
-                <th className="px-3 py-2.5">{t('ns_col_type')}</th>
-                <th className="px-3 py-2.5">{t('ns_col_brand')}</th>
-                <th className="px-3 py-2.5">{t('ns_col_serial')}</th>
-                <th className="px-3 py-2.5">{t('ns_col_site_loc')}</th>
-                <th className="px-3 py-2.5">{t('ns_col_status')}</th>
-                <th className="px-3 py-2.5 text-right">{t('ns_col_action')}</th>
+                <th className="p-3.5">{t('xfer_col_asset')}</th>
+                <th className="p-3.5">{t('std_machine_name')}</th>
+                <th className="p-3.5">{t('ml_col_brand')}</th>
+                <th className="p-3.5">{t('ml_col_serial')}</th>
+                <th className="p-3.5">{t('ml_col_site_loc')}</th>
+                <th className="p-3.5">{t('status')}</th>
+                <th className="p-3.5 text-right">{t('actions')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {shown.map((m) => (
-                <tr
-                  key={m.id}
-                  onClick={() => setDetail(m)}
-                  className={`cursor-pointer transition-colors hover:bg-emerald-50/40 dark:hover:bg-slate-800/40 ${sel.has(m.asset_code) ? 'bg-emerald-50/60 dark:bg-indigo-950/20' : ''}`}
-                >
-                  <td
-                    className="px-3 py-2.5 w-8 text-center"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isSelectable(m)) toggleOne(m.asset_code);
-                    }}
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {shown.map((m) => {
+                const nm = getMachineLabel({
+                  localName: types.find((x) => x.standard_name === m.standard_machine_name)?.local_name ?? undefined,
+                  standardMachineName: m.standard_machine_name ?? undefined,
+                  item: m.item ?? undefined,
+                });
+                const isUnassigned = (m.location_id ?? '').includes('UNASSIGNED');
+                return (
+                  <tr
+                    key={m.id}
+                    onClick={() => setDetail(m)}
+                    className={`hover:bg-emerald-50/40 cursor-pointer transition-colors ${sel.has(m.asset_code) ? 'bg-emerald-50/60' : ''}`}
                   >
-                    {isSelectable(m) && (
-                      <button type="button" className="p-1 cursor-pointer">
-                        {sel.has(m.asset_code) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
-                      </button>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="font-mono font-bold text-emerald-700 hover:text-emerald-800">{m.asset_code}</div>
-                    <div className="font-mono text-[10px] text-slate-400">{m.barcode}</div>
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200">
-                    {typeLabel(m.standard_machine_name)}
-                    {m.item && m.item !== m.standard_machine_name && (
-                      <div className="text-[10px] text-slate-400">{m.item}</div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-700 dark:text-slate-200">
-                    {[m.manufacturer, m.model].filter(Boolean).join(' ') || '-'}
-                  </td>
-                  <td className="px-3 py-2.5 font-mono text-slate-600 dark:text-slate-300">{m.serial || '-'}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold font-mono text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800">
-                        {m.site_id}
-                      </span>
+                    <td
+                      className="p-3.5 text-center"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isSelectable(m)) toggleOne(m.asset_code);
+                      }}
+                    >
+                      {isSelectable(m) && (
+                        <button type="button" className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer">
+                          {sel.has(m.asset_code) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                        </button>
+                      )}
+                    </td>
+
+                    <td className="p-3.5">
+                      <div className="font-mono font-bold text-emerald-700 hover:text-emerald-800">{m.asset_code}</div>
+                      <div className="font-mono text-[11px] text-slate-400">{m.barcode}</div>
+                    </td>
+
+                    <td className="p-3.5">
+                      <div className="font-bold text-slate-900 text-xs">{nm.primary}</div>
+                      <div className="text-[11px] text-slate-500">{[nm.secondary, m.item].filter(Boolean).join(' · ') || '-'}</div>
+                    </td>
+
+                    <td className="p-3.5">
+                      <div className="font-semibold text-slate-800">{m.manufacturer}</div>
+                      <div className="font-mono text-[11px] text-slate-500">{m.model}</div>
+                    </td>
+
+                    <td className="p-3.5 font-mono text-slate-700 font-medium">{m.serial}</td>
+
+                    <td className="p-3.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold font-mono text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800">
+                          {m.site_id}
+                        </span>
+                        <span
+                          className={`font-mono font-bold text-xs ${
+                            isUnassigned ? 'text-amber-700 underline decoration-amber-400' : 'text-slate-800'
+                          }`}
+                        >
+                          {m.location_id}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="p-3.5">
                       <span
-                        className={`font-mono font-bold text-xs ${
-                          (m.location_id ?? '').includes('UNASSIGNED') ? 'text-amber-700 underline decoration-amber-400' : 'text-slate-800 dark:text-slate-100'
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          m.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : m.status === 'IN_TRANSIT' ? 'bg-sky-50 text-sky-700 border-sky-200'
+                          : m.status === 'BROKEN' ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : m.status === 'IN_REPAIR' ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : m.status === 'LOANED' ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-200'
                         }`}
                       >
-                        {m.location_id || '-'}
+                        {m.status}
                       </span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={`inline-block px-2 py-0.5 rounded-md border text-[10px] font-bold ${statusCls[m.status] ?? statusCls.SOLD}`}>
-                      {t(`ns_st_${m.status}`)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      onClick={() => setDetail(m)}
-                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-                      title={t('ns_view_detail')}
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+
+                    <td className="p-3.5 text-right" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => setDetail(m)}
+                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                        title={t('ml_view_detail')}
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {!loading && shown.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-10 text-center text-slate-400">
+                  <td colSpan={8} className="p-12 text-center text-slate-400">
                     {machines.length === 0 ? t(isAdminMaster ? 'ns_empty' : 'ns_empty_user') : t('ns_no_match')}
                   </td>
                 </tr>

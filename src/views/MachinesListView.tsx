@@ -13,11 +13,10 @@ import {
   ChevronRight,
   Eye,
   Building,
-  RotateCcw,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
-import { getTranslation, makeT, localizeMessage } from '../services/translations';
+import { getTranslation, makeT } from '../services/translations';
 import { storageService } from '../services/storage';
 import { Machine, MachineStatus, MachineListFilter } from '../types';
 import { getMachineLabel } from '../utils/machineName';
@@ -47,8 +46,9 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSite, setSelectedSite] = useState<string>(initialFilter?.site ?? 'ALL');
-  const [selectedStatus, setSelectedStatus] = useState<string>(initialFilter?.status ?? 'ACTIVE');
+  const [selectedStatus, setSelectedStatus] = useState<string>(initialFilter?.status ?? 'ALL');
   const [selectedManufacturer, setSelectedManufacturer] = useState<string>(initialFilter?.manufacturer ?? 'ALL');
+  const [selectedName, setSelectedName] = useState<string>('ALL');
   const [onlyUnassigned, setOnlyUnassigned] = useState(initialFilter?.unassigned ?? false);
   const [typeFilter, setTypeFilter] = useState<string | null>(initialFilter?.typeName ?? null);
   const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
@@ -70,30 +70,6 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
   const isSelectable = (m: Machine) =>
     canAccessSite(m.siteId) && m.status !== 'SOLD' && !m.pendingTransferId;
 
-  // Quick Google Sheet Sync
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncToast, setSyncToast] = useState<string | null>(null);
-
-  const handleQuickSyncFromSheet = async () => {
-    setIsSyncing(true);
-    setSyncToast(null);
-    try {
-      const res = await storageService.syncFromGoogleSheet(undefined, 'machine_asset');
-      if (res.success) {
-        setSyncToast(t('ml_sync_ok', { n: res.count, source: res.source }));
-        setTimeout(() => setSyncToast(null), 5000);
-      } else {
-        setSyncToast(t('ml_sync_fail', { msg: localizeMessage(res.message, language) }));
-        setTimeout(() => setSyncToast(null), 7000);
-      }
-    } catch (e: any) {
-      setSyncToast(t('ml_sync_err', { msg: localizeMessage(e.message, language) }));
-      setTimeout(() => setSyncToast(null), 5000);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   // Distinct manufacturers
   const manufacturers = useMemo(() => {
     const set = new Set<string>();
@@ -102,6 +78,17 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
     }
     return Array.from(set).sort();
   }, [allMachines]);
+
+  // Pilihan Nama Mesin = nama lokal (atau nama standar bila nama lokal kosong), dengan jumlah per nama.
+  const nameOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of allMachines) {
+      if (selectedSite !== 'ALL' && m.siteId !== selectedSite) continue;
+      const label = getMachineLabel(m).primary;
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [allMachines, selectedSite]);
 
   // Filtered dataset
   const machinesBeforeLocation = useMemo(() => {
@@ -126,6 +113,9 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
       // 3b. Jenis mesin (dari klik dashboard)
       if (typeFilter && (m.standardMachineName || 'Unknown Type') !== typeFilter) return false;
 
+      // 3c. Nama mesin (nama lokal)
+      if (selectedName !== 'ALL' && getMachineLabel(m).primary !== selectedName) return false;
+
       // 4. Manufacturer filter
       if (selectedManufacturer !== 'ALL' && m.manufacturer !== selectedManufacturer) return false;
 
@@ -149,7 +139,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
 
       return true;
     });
-  }, [allMachines, currentUser, selectedSite, selectedStatus, selectedManufacturer, onlyUnassigned, searchQuery, typeFilter]);
+  }, [allMachines, currentUser, selectedSite, selectedStatus, selectedManufacturer, selectedName, onlyUnassigned, searchQuery, typeFilter]);
 
   // Jumlah mesin per lokasi, dihitung dari hasil filter lain (kecuali lokasi) agar angka di dropdown
   // sama dengan jumlah baris tabel setelah lokasi dipilih.
@@ -327,7 +317,7 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               }}
               onKeyDown={handleSearchKeyDown}
               onPaste={handleSearchPaste}
-              placeholder={t('ml_search_ph')}
+              placeholder={t('ml_search_ph2')}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 font-mono transition-colors shadow-xs"
             />
             {searchQuery && (
@@ -357,26 +347,8 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
               <Download className="w-4 h-4 text-emerald-600" />
               <span className="hidden md:inline">{t('export_excel')}</span>
             </button>
-
-            <button
-              onClick={handleQuickSyncFromSheet}
-              disabled={isSyncing}
-              className="px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-transform active:scale-95"
-              title={t('ml_sync_title')}
-            >
-              <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span className="hidden lg:inline">{isSyncing ? t('ml_syncing') : t('ml_sync_btn')}</span>
-            </button>
           </div>
         </div>
-
-        {/* Sync Toast Feedback */}
-        {syncToast && (
-          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
-            <RotateCcw className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{syncToast}</span>
-          </div>
-        )}
 
         {typeFilter && (
           <div className="text-xs">
@@ -450,27 +422,25 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
             </select>
           </div>
 
-          {/* Status Filter */}
+          {/* Nama Mesin Filter (nama lokal) */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
-              {t('ml_status_label')}
+              {t('ml_name_label')}
             </label>
             <select
-              value={selectedStatus}
+              value={selectedName}
               onChange={(e) => {
-                setSelectedStatus(e.target.value);
+                setSelectedName(e.target.value);
                 setCurrentPage(1);
               }}
               className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:border-emerald-500"
             >
-              <option value="ALL">{t('ml_st_all')}</option>
-              <option value="ACTIVE">{t('ml_st_active')}</option>
-              <option value="IN_TRANSIT">{t('ml_st_transit')}</option>
-              <option value="IN_REPAIR">{t('mv_status_in_repair')}</option>
-              <option value="BROKEN">{t('mv_status_broken')}</option>
-              <option value="BROKEN_REPAIR">{t('ml_st_broken_repair')}</option>
-              <option value="LOANED">{t('ml_st_loaned')}</option>
-              <option value="SOLD">{t('mv_status_sold')}</option>
+              <option value="ALL">{t('ml_all_names')}</option>
+              {nameOptions.map(([name, n]) => (
+                <option key={name} value={name}>
+                  {name} ({n.toLocaleString()})
+                </option>
+              ))}
             </select>
           </div>
 
@@ -515,6 +485,26 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Filter status hanya muncul bila dibuka dari kartu Dashboard; bisa dihapus dengan ✕ */}
+        {selectedStatus !== 'ALL' && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 font-bold">
+              {t('ml_status_label')} {selectedStatus === 'BROKEN_REPAIR' ? t('ml_st_broken_repair') : selectedStatus}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedStatus('ALL');
+                  setCurrentPage(1);
+                }}
+                className="text-sky-600 hover:text-sky-900 cursor-pointer"
+                aria-label="clear"
+              >
+                ✕
+              </button>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Bulk Action Toolbar */}
