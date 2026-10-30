@@ -396,7 +396,11 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     if (!receivingTransfer) return [];
     const site = receivingTransfer.toSite;
     if (nsCodes.has(receivingTransfer.assetCode.toUpperCase())) {
-      return nsAreas.filter((l) => l.siteId === site);
+      // Mesin non sewing boleh ditempatkan di area non sewing maupun di line sewing (bukan slot rak).
+      const lines = storageService
+        .getLocations(site)
+        .filter((l) => l.active && String(l.type) !== 'NS_AREA' && String(l.type) !== 'RACK_SLOT');
+      return [...nsAreas.filter((l) => l.siteId === site), ...lines];
     }
     return storageService.getLocations(site).filter((l) => l.active && String(l.type) !== 'NS_AREA');
   }, [receivingTransfer, nsCodes, nsAreas]);
