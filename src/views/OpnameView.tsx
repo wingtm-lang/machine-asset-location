@@ -39,6 +39,7 @@ import { supabase } from '../services/supabase';
 
 import { Location, Machine, OpnameItem, OpnameResult, SiteId } from '../types';
 import { getMachineLabel } from '../utils/machineName';
+import { ScannerModal } from '../components/ScannerModal';
 
 export interface ServerOpnameSession {
   sessionId: string;
@@ -240,6 +241,9 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
 
   // Toast System
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isCameraScanOpen, setIsCameraScanOpen] = useState(false);
+  const [cameraScanStatus, setCameraScanStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   const addToast = useCallback((type: 'success' | 'error' | 'warning' | 'info', message: string) => {
     const id = `toast-${Date.now()}-${Math.random()}`;
     setToasts((prev) => [...prev, { id, type, message }]);
@@ -398,7 +402,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
   };
 
   // Process Scanned Code in Active Session
-  const handleProcessScan = async (code: string) => {
+  const handleProcessScan = async (code: string): Promise<{ type: 'success' | 'error'; text: string } | void> => {
     if (!activeSession || !currentUser) return;
     const clean = code.trim();
     if (!clean) return;
@@ -408,7 +412,7 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
       soundService.playWarning();
       addToast('warning', t('op_dup_scan', { code: clean }));
       setInputScanCode('');
-      return;
+      return { type: 'error', text: t('op_dup_scan', { code: clean }) };
     }
 
     let machine: Machine | null = storageService.getMachineByCode(clean).machine;
@@ -471,7 +475,30 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
     };
 
     setActiveSession(updatedSession);
+
+    const nm = machine ? getMachineLabel(machine).primary : '';
+    const head = machine ? `${assetCode} · ${nm}` : assetCode;
+    const text =
+      result === 'MATCH'
+        ? t('op_cam_match', { name: head, n: updatedItems.length })
+        : result === 'UNKNOWN_BARCODE'
+        ? t('op_cam_unknown', { code: clean })
+        : t('op_cam_misplaced', { name: head, loc: machine?.locationId || '-' });
+    return { type: result === 'MATCH' ? 'success' : 'error', text };
   };
+
+  // Satu barcode dari kamera: kamera tetap terbuka, nama mesin dan hasilnya tampil di panel kamera.
+  const handleCameraScan = async (code: string) => {
+    const r = await handleProcessScan(code);
+    if (r) setCameraScanStatus(r);
+  };
+
+  // Mesin dari factory lain yang sudah di-scan di sesi ini (belum dipindahkan ke lokasi ini)
+  const foreignItems = scannedItems.filter((i) => i.result === 'MISPLACED_OTHER_SITE');
+  const foreignMachineOf = (item: OpnameItem): Machine | null =>
+    storageService.getMachineByCode(item.assetCode).machine ??
+    nsMachines.find((m) => m.assetCode === item.assetCode) ??
+    null;
 
   // Quick move misplaced machine here
   const handleQuickMoveHere = async (item: OpnameItem) => {
@@ -1198,10 +1225,10 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
                   autoComplete="off"
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-                  {onOpenScanner && (
+                  {(
                     <button
                       type="button"
-                      onClick={onOpenScanner}
+                      onClick={() => { setCameraScanStatus(null); setIsCameraScanOpen(true); }}
                       className="p-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
                       title={t('op_open_camera')}
                     >
@@ -1218,6 +1245,47 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
               </div>
             </form>
           </div>
+
+          {/* Mesin milik factory lain yang ditemukan di lokasi ini */}
+          {foreignItems.length > 0 && (
+            <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-rose-200 dark:border-rose-800/80 shadow-sm space-y-3">
+              <h3 className="font-bold text-sm text-rose-700 dark:text-rose-400 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                <span>{t('op_foreign_heading', { n: foreignItems.length })}</span>
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('op_foreign_hint')}</p>
+              <div className="space-y-2">
+                {foreignItems.map((item) => {
+                  const fm = foreignMachineOf(item);
+                  return (
+                    <div
+                      key={item.assetCode}
+                      className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                    >
+                      <div>
+                        <div className="font-mono font-bold text-rose-950 dark:text-rose-100">{item.assetCode}</div>
+                        {fm && (
+                          <div className="text-[11px] text-rose-900 dark:text-rose-200">{getMachineLabel(fm).primary}</div>
+                        )}
+                        <div className="text-[11px] text-rose-800 dark:text-rose-300">
+                          {t('op_other_factory')} <span className="font-bold">{item.registeredSite}</span> ({item.registeredLocation})
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickMoveHere(item)}
+                        disabled={relocatingCode === item.assetCode}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 self-start sm:self-auto shadow-xs transition-colors cursor-pointer"
+                      >
+                        <ArrowRight className="w-3.5 h-3.5" />
+                        <span>{relocatingCode === item.assetCode ? t('op_moving') : getTranslation('move_to_this_location', language)}</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Scanned Items Stream */}
           <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 shadow-sm space-y-4">
@@ -1441,6 +1509,17 @@ export const OpnameView: React.FC<OpnameViewProps> = ({ onOpenScanner }) => {
           </div>
         </div>
       )}
+
+      {/* Kamera terus-menerus: scan berurutan tanpa menutup kamera, nama mesin tampil per scan */}
+      <ScannerModal
+        isOpen={isCameraScanOpen}
+        onClose={() => setIsCameraScanOpen(false)}
+        initialMode="camera"
+        captureLabel={t('op_cam_title')}
+        onContinuousScan={handleCameraScan}
+        continuousStatus={cameraScanStatus}
+        doneLabel={t('op_cam_done', { n: scannedItems.length })}
+      />
     </div>
   );
 };
