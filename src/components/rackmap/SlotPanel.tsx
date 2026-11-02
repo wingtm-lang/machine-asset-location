@@ -8,6 +8,7 @@ import {
   rackMapService,
 } from '../../services/rackMapService';
 import { SelectedColumnCoord } from './RackDetail';
+import { supabase } from '../../services/supabase';
 import {
   Search,
   RotateCcw,
@@ -253,6 +254,85 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
     }
   };
 
+  // --- Mesin non sewing di kolom ini: berbagi slot dengan mesin sewing, tidak dihitung dalam 3 slot ---
+  type NsHere = { asset_code: string; item: string | null; standard_machine_name: string | null; location_id: string };
+  const slotIds = [1, 2, 3].map((n) => `WH2-${positionCode}-S${n}`);
+  const [nsOpen, setNsOpen] = useState(false);
+  const [nsHere, setNsHere] = useState<NsHere[]>([]);
+  const [nsSlot, setNsSlot] = useState(1);
+  const [nsCode, setNsCode] = useState('');
+  const [nsBusy, setNsBusy] = useState(false);
+
+  const loadNsHere = async () => {
+    const { data } = await supabase
+      .from('machines')
+      .select('asset_code, item, standard_machine_name, location_id')
+      .eq('category', 'NON_SEWING')
+      .in('location_id', slotIds)
+      .order('location_id');
+    setNsHere((data ?? []) as unknown as NsHere[]);
+  };
+  useEffect(() => {
+    setNsOpen(false);
+    setNsCode('');
+    void loadNsHere();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positionCode]);
+
+  const nsMove = async (assetCode: string, locationId: string) => {
+    const { data, error } = await supabase.rpc('move_machine', {
+      p_asset_code: assetCode,
+      p_location_id: locationId,
+      p_request_id: crypto.randomUUID(),
+    });
+    const r = (data ?? {}) as { success?: boolean; message?: string };
+    if (error || r.success === false) {
+      notify('error', localizeMessage(error?.message || r.message || '', language));
+      return false;
+    }
+    return true;
+  };
+
+  const handleNsAdd = async () => {
+    const code = nsCode.trim();
+    if (!code || nsBusy) return;
+    setNsBusy(true);
+    try {
+      const safe = code.replace(/[,()"\\]/g, '');
+      const { data } = await supabase
+        .from('machines')
+        .select('asset_code, site_id')
+        .eq('category', 'NON_SEWING')
+        .or(`barcode.eq.${safe},asset_code.eq.${safe.toUpperCase()},serial.eq.${safe}`)
+        .limit(1);
+      const row = (data ?? [])[0] as { asset_code: string; site_id: string } | undefined;
+      if (!row) {
+        notify('error', t('sp_ns_not_found', { code }));
+      } else if (row.site_id !== 'WH2') {
+        notify('error', t('sp_ns_not_wh2', { code: row.asset_code, site: row.site_id }));
+      } else if (await nsMove(row.asset_code, `WH2-${positionCode}-S${nsSlot}`)) {
+        notify('success', t('sp_ns_added', { code: row.asset_code, slot: nsSlot }));
+        setNsCode('');
+        await loadNsHere();
+      }
+    } finally {
+      setNsBusy(false);
+    }
+  };
+
+  const handleNsRemove = async (assetCode: string) => {
+    if (nsBusy) return;
+    setNsBusy(true);
+    try {
+      if (await nsMove(assetCode, 'WH2-NS-UNASSIGNED')) {
+        notify('success', t('sp_ns_removed', { code: assetCode }));
+        await loadNsHere();
+      }
+    } finally {
+      setNsBusy(false);
+    }
+  };
+
   const isGlobalLoading = loadingActionSlot !== null || searchingSlot !== null;
 
   return (
@@ -467,6 +547,75 @@ export const SlotPanel: React.FC<SlotPanelProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* Mesin non sewing di kolom ini: tampil setelah tombol ditekan */}
+      <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button
+          type="button"
+          onClick={() => setNsOpen((v) => !v)}
+          className="w-full flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+          aria-expanded={nsOpen}
+        >
+          <span>{t('sp_ns_toggle', { n: nsHere.length })}</span>
+          <span aria-hidden="true">{nsOpen ? '−' : '+'}</span>
+        </button>
+        {nsOpen && (
+          <div className="mt-2 space-y-2">
+            {nsHere.length === 0 ? (
+              <div className="text-[11px] text-slate-400">{t('sp_ns_none')}</div>
+            ) : (
+              nsHere.map((m) => (
+                <div
+                  key={m.asset_code}
+                  className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px]"
+                >
+                  <div className="min-w-0">
+                    <div className="font-mono font-bold text-slate-800 dark:text-slate-100">{m.asset_code}</div>
+                    <div className="text-slate-500 dark:text-slate-400 truncate">
+                      {m.standard_machine_name || m.item || '-'} · {t('sp_slot_n', { n: m.location_id.slice(-1) })}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={nsBusy}
+                    onClick={() => handleNsRemove(m.asset_code)}
+                    className="px-2 py-1 rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 shrink-0"
+                  >
+                    {t('sp_ns_remove')}
+                  </button>
+                </div>
+              ))
+            )}
+            <div className="flex items-center gap-2">
+              <select
+                value={nsSlot}
+                onChange={(e) => setNsSlot(Number(e.target.value))}
+                className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                aria-label={t('sp_ns_slot_aria')}
+              >
+                {[1, 2, 3].map((n) => (
+                  <option key={n} value={n}>{t('sp_slot_n', { n })}</option>
+                ))}
+              </select>
+              <input
+                value={nsCode}
+                onChange={(e) => setNsCode(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleNsAdd(); } }}
+                placeholder={t('sp_ns_ph')}
+                className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+              />
+              <button
+                type="button"
+                disabled={nsBusy || !nsCode.trim()}
+                onClick={() => void handleNsAdd()}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-50"
+              >
+                {t('sp_ns_add')}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tombol Undo Penempatan Terakhir */}

@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const MACHINE_COLS =
   'id, asset_code, barcode, item, standard_machine_name, serial, manufacturer, model, home_site_id, acq_date, ' +
-  'status, status_since, site_id, location_id, loan_to, loan_due_date, data_flag, notes, ' +
+  'status, status_since, site_id, location_id, loan_to, loan_due_date, data_flag, notes, origin_purchase, doc_no, ' +
   'last_moved_at, last_opname_at, updated_at, machine_types(local_name)';
 
 // ---------- pembantu ----------
@@ -372,7 +372,7 @@ class StorageService {
   private mapMachine(r: Row): Machine {
     const mt = r.machine_types as Row | null | undefined;
     const status = String(r.status) as MachineStatus;
-    return {
+    const base: Machine = {
       assetCode: String(r.asset_code),
       barcode: String(r.barcode),
       item: String(r.item ?? ''),
@@ -396,6 +396,8 @@ class StorageService {
       updatedBy: '',
       notes: r.notes ?? undefined,
     };
+    // Origin purchase & No. Doc: hanya ditampilkan di detail mesin (tidak di tabel depan).
+    return Object.assign(base, { originPurchase: r.origin_purchase ?? undefined, docNo: r.doc_no ?? undefined });
   }
 
   private async loadTransfers(): Promise<void> {
@@ -811,13 +813,21 @@ class StorageService {
 
   public async cancelTransfer(
     transferId: string,
-    _username?: string,
-    _userSiteAccess?: string[]
+    _username: string,
+    _userSiteAccess: string[]
   ): Promise<{ success: boolean; message: string }> {
-    return this.cancelTransfers([transferId]);
+    const meta = this.transferMeta.get(transferId);
+    if (!meta) return { success: false, message: 'Transfer tidak ditemukan. Muat ulang data lalu coba lagi.' };
+    const res = await this.rpc('cancel_transfer', {
+      p_transfer_id: meta.orderId,
+      p_asset_codes: [meta.assetCode],
+      p_request_id: uuid(),
+    });
+    if (!res.success) return { success: false, message: res.message };
+    await this.afterMutation([meta.assetCode]);
+    return { success: true, message: res.message };
   }
 
-  
   /** Batalkan beberapa mesin sekaligus (semua baris transfer yang masih In Transit dalam satu batch). */
   public async cancelTransfers(transferIds: string[]): Promise<{ success: boolean; message: string }> {
     const byOrder = new Map<number, string[]>();
@@ -847,7 +857,7 @@ class StorageService {
     await this.afterMutation(allCodes);
     return { success: true, message: lastMessage };
   }
-  
+
   private async resolveSessionId(sessionNo: string): Promise<number | null> {
     const { data, error } = await supabase.from('opname_sessions').select('id').eq('session_no', sessionNo).limit(1);
     if (error) return null;

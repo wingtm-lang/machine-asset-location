@@ -307,9 +307,17 @@ export const MachineDetailModal: React.FC<MachineDetailModalProps> = ({
                       <span className="text-slate-500">{t('md_korean')}</span>
                       <span className="text-slate-800 font-medium">{machine.item || '-'}</span>
                     </div>
-                    <div className="flex justify-between py-1">
+                    <div className="flex justify-between py-1 border-b border-slate-200/80">
                       <span className="text-slate-500">{t('md_acq')}</span>
                       <span className="text-slate-800">{machine.acqDate || '-'}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-200/80">
+                      <span className="text-slate-500">{t('md_origin_purchase')}</span>
+                      <span className="text-slate-800 text-right">{(machine as Machine & { originPurchase?: string }).originPurchase || '-'}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-slate-500">{t('md_doc_no')}</span>
+                      <span className="text-slate-800 font-mono text-right">{(machine as Machine & { docNo?: string }).docNo || '-'}</span>
                     </div>
                   </div>
                 </div>

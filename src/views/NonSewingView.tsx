@@ -27,13 +27,15 @@ interface NsMachine {
   site_id: string;
   location_id: string | null;
   notes: string | null;
+  origin_purchase?: string | null;
+  doc_no?: string | null;
 }
 interface NsType { standard_name: string; local_name: string | null }
 interface NsLoc { location_id: string; site_id: string; type: string; display_name: string }
 
 const COLS =
   'id, asset_code, barcode, item, standard_machine_name, serial, manufacturer, model, home_site_id, acq_date, ' +
-  'status, site_id, location_id, notes';
+  'status, site_id, location_id, notes, origin_purchase, doc_no';
 const PAGE = 25;
 const MOVE_STATUSES = ['ACTIVE', 'BROKEN', 'IN_REPAIR'];
 
@@ -149,7 +151,6 @@ export const NonSewingView: React.FC<{ initialSite?: string; focusCode?: string 
           .from('locations')
           .select('location_id, site_id, type, display_name')
           .eq('active', true)
-          .neq('type', 'RACK_SLOT')
           .order('sort_order')
           .order('location_id'),
       ]);
@@ -287,16 +288,18 @@ export const NonSewingView: React.FC<{ initialSite?: string; focusCode?: string 
     });
   const selectedMachines = machines.filter((m) => sel.has(m.asset_code));
 
-  const getSiteLocGroups = (site: string) => {
+  const locGroupOptions = (site: string) => {
     const list = locs.filter((l) => l.site_id === site);
     return {
       area: list.filter((l) => l.type === 'NS_AREA'),
-      general: list.filter((l) => l.type !== 'NS_AREA'),
+      general: list.filter((l) => l.type !== 'NS_AREA' && l.type !== 'RACK_SLOT'),
+      rack: list.filter((l) => l.type === 'RACK_SLOT'),
     };
   };
 
-  const locSelect = (site: string, value: string, onChange: (v: string) => void) => {
-    const { area, general } = getSiteLocGroups(site);
+  // withRack: pindah boleh ke slot rak WH2 (berbagi slot dengan mesin sewing); tambah mesin baru tidak.
+  const locSelect = (site: string, value: string, onChange: (v: string) => void, withRack = false) => {
+    const { area, general, rack } = locGroupOptions(site);
     return (
       <select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)} disabled={!site}>
         <option value="">{t('ns_pick_location')}</option>
@@ -311,6 +314,13 @@ export const NonSewingView: React.FC<{ initialSite?: string; focusCode?: string 
           <optgroup label={t('ns_group_general')}>
             {general.map((l) => (
               <option key={l.location_id} value={l.location_id}>{l.display_name} ({l.location_id})</option>
+            ))}
+          </optgroup>
+        )}
+        {withRack && rack.length > 0 && (
+          <optgroup label={t('ns_group_rack')}>
+            {rack.map((l) => (
+              <option key={l.location_id} value={l.location_id}>{l.location_id}</option>
             ))}
           </optgroup>
         )}
@@ -889,7 +899,7 @@ export const NonSewingView: React.FC<{ initialSite?: string; focusCode?: string 
               {t('ns_move_now')}: <b className="text-slate-800 dark:text-slate-100">{moving.site_id} / {moving.location_id || '-'}</b>
             </div>
             <Field label={t('ns_f_new_location')}>
-              {locSelect(moving.site_id, moveForm.location, (v) => setMoveForm({ ...moveForm, location: v }))}
+              {locSelect(moving.site_id, moveForm.location, (v) => setMoveForm({ ...moveForm, location: v }), true)}
             </Field>
             <Field label={t('ns_f_status')}>
               <select className={inputCls} value={moveForm.status} onChange={(e) => setMoveForm({ ...moveForm, status: e.target.value })}>

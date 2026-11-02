@@ -17,6 +17,8 @@ export interface NsDetail {
   site_id: string;
   location_id: string | null;
   notes: string | null;
+  origin_purchase?: string | null;
+  doc_no?: string | null;
 }
 
 interface Props {
@@ -110,6 +112,8 @@ export const NonSewingDetailModal: React.FC<Props> = ({ machine: m, localName, o
             <Row label={t('md_brand')}>{m.manufacturer}</Row>
             <Row label="Model:">{m.model}</Row>
             <Row label="Serial Number:">{m.serial}</Row>
+            <Row label={t('md_origin_purchase')}>{m.origin_purchase}</Row>
+            <Row label={t('md_doc_no')}>{m.doc_no}</Row>
             <Row label={t('ns_f_notes')} last>{m.notes}</Row>
           </div>
         </div>

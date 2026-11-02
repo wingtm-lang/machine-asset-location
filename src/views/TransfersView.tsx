@@ -243,6 +243,12 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   const nsCodes = useMemo(() => new Set(nsMachines.map((m) => m.assetCode.toUpperCase())), [nsMachines]);
   const isNsMachine = (m: { assetCode: string }) => nsCodes.has(m.assetCode.toUpperCase());
 
+  // Mesin sewing di slot rak WH2 yang berbagi slot dengan mesin non sewing: tanyakan apakah ikut dikirim.
+  type AttachAsk = { machine: Machine; candidates: Machine[] };
+  const [attachQueue, setAttachQueue] = useState<AttachAsk[]>([]);
+  const [attachPicked, setAttachPicked] = useState<Set<string>>(new Set());
+  const askedAttach = useRef<Set<string>>(new Set());
+
   const [activeTab, setActiveTab] = useState<'inbound' | 'outbound' | 'send_new'>(() => {
     return batchMachines && batchMachines.length > 0 ? 'send_new' : 'inbound';
   });
@@ -293,6 +299,48 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
     list: siteGroups.map((g) => `${g.siteId} (${g.machines.length})`).join(', '),
     transfers: t('xf2_n_transfers', { n: siteGroups.length }),
   });
+
+  useEffect(() => {
+    const rackRe = /^WH2-R[1-6]-[ABC][0-9]+-S[1-3]$/;
+    const inList = new Set(selectedBatchMachines.map((m) => m.assetCode.toUpperCase()));
+    const asks: AttachAsk[] = [];
+    for (const m of selectedBatchMachines) {
+      const code = m.assetCode.toUpperCase();
+      if (askedAttach.current.has(code) || isNsMachine(m) || !rackRe.test(m.locationId || '')) continue;
+      askedAttach.current.add(code);
+      const candidates = nsMachines.filter(
+        (n) =>
+          n.locationId === m.locationId &&
+          !inList.has(n.assetCode.toUpperCase()) &&
+          n.status !== 'SOLD' &&
+          n.status !== 'IN_TRANSIT' &&
+          canAccessSite(n.siteId)
+      );
+      if (candidates.length > 0) asks.push({ machine: m, candidates });
+    }
+    if (asks.length > 0) setAttachQueue((q) => [...q, ...asks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBatchMachines, nsMachines]);
+
+  useEffect(() => {
+    const cur = attachQueue[0];
+    setAttachPicked(new Set(cur ? cur.candidates.map((c) => c.assetCode) : []));
+  }, [attachQueue]);
+
+  const finishAttachAsk = (include: boolean) => {
+    const cur = attachQueue[0];
+    if (!cur) return;
+    if (include) {
+      const add = cur.candidates.filter((c) => attachPicked.has(c.assetCode));
+      if (add.length > 0) {
+        setSelectedBatchMachines((prev) => {
+          const seen = new Set(prev.map((m) => m.assetCode.toUpperCase()));
+          return [...add.filter((c) => !seen.has(c.assetCode.toUpperCase())), ...prev];
+        });
+      }
+    }
+    setAttachQueue((q) => q.slice(1));
+  };
 
   // Scan input states
   const [scanInput, setScanInput] = useState<string>('');
@@ -425,10 +473,6 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
       return { valid: false, error: t('xf2_err_not_found', { code: clean }), reason: 'NOT_FOUND' };
     }
 
-    // Satu transfer hanya boleh berisi satu jenis: semua sewing atau semua non sewing.
-    if (currentList.length > 0 && isNsMachine(currentList[0]) !== isNsMachine(machine)) {
-      return { valid: false, error: t('xf3_err_mixed_kind', { code: machine.assetCode }), reason: 'MIXED_KIND' };
-    }
 
     if (currentList.some((m) => m.assetCode.toUpperCase() === machine.assetCode.toUpperCase())) {
       return { valid: false, error: t('xf2_err_in_list', { code: machine.assetCode }), reason: 'ALREADY_IN_LIST' };
@@ -1634,6 +1678,56 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold disabled:opacity-50 transition-colors min-h-[40px] cursor-pointer"
               >
                 {isReceiving ? t('xfer_saving') : t('xfer_confirm_receipt')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mesin non sewing di slot yang sama dengan mesin sewing yang akan dikirim */}
+      {attachQueue[0] && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+            <h3 className="font-bold text-sm text-slate-900 dark:text-white">{t('xf4_attach_title')}</h3>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              {t('xf4_attach_body', { code: attachQueue[0].machine.assetCode, loc: attachQueue[0].machine.locationId })}
+            </p>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {attachQueue[0].candidates.map((c) => (
+                <label key={c.assetCode} className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={attachPicked.has(c.assetCode)}
+                    onChange={(e) =>
+                      setAttachPicked((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(c.assetCode); else next.delete(c.assetCode);
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="min-w-0">
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-100">{c.assetCode}</span>
+                    <span className="block text-slate-500 dark:text-slate-400 truncate">{getMachineLabel(c).primary}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => finishAttachAsk(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-200"
+              >
+                {t('xf4_attach_skip')}
+              </button>
+              <button
+                type="button"
+                onClick={() => finishAttachAsk(true)}
+                disabled={attachPicked.size === 0}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-50"
+              >
+                {t('xf4_attach_include', { n: attachPicked.size })}
               </button>
             </div>
           </div>

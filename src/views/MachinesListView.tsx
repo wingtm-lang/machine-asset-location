@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../services/authContext';
+import { sortSites } from '../services/siteOrder';
 import { getTranslation, makeT } from '../services/translations';
 import { storageService } from '../services/storage';
 import { Machine, MachineStatus, MachineListFilter } from '../types';
@@ -41,7 +42,8 @@ export const MachinesListView: React.FC<MachinesListViewProps> = ({
   const { currentUser, language, canPerformAction, canAccessSite } = useAuth();
   const t = makeT(language);
   const allMachines = storageService.getAllMachines();
-  const sites = storageService.getSites();
+  // Filter Site hanya menampilkan site yang boleh diakses pengguna, dengan urutan site standar.
+  const sites = sortSites(storageService.getSites().filter((x) => canAccessSite(x.siteId)));
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');

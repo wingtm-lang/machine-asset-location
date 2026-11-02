@@ -52,7 +52,8 @@ export const BulkMoveNonSewingModal: React.FC<Props> = ({ machines, locs, onClos
     const list = locs.filter((l) => l.site_id === site);
     return {
       area: list.filter((l) => l.type === 'NS_AREA'),
-      general: list.filter((l) => l.type !== 'NS_AREA'),
+      general: list.filter((l) => l.type !== 'NS_AREA' && l.type !== 'RACK_SLOT'),
+      rack: list.filter((l) => l.type === 'RACK_SLOT'),
     };
   };
 
@@ -103,7 +104,7 @@ export const BulkMoveNonSewingModal: React.FC<Props> = ({ machines, locs, onClos
 
         <form onSubmit={submit} className="p-5 space-y-4">
           {groups.map((g) => {
-            const { area, general } = optionsFor(g.site);
+            const { area, general, rack } = optionsFor(g.site);
             const finished = doneLines.some((l) => l.startsWith(`${g.site}:`));
             const sample = g.items.slice(0, 4).map((x) => x.asset_code).join(', ');
             return (
@@ -140,6 +141,13 @@ export const BulkMoveNonSewingModal: React.FC<Props> = ({ machines, locs, onClos
                       <optgroup label={t('ns_group_general')}>
                         {general.map((l) => (
                           <option key={l.location_id} value={l.location_id}>{l.display_name} ({l.location_id})</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {rack.length > 0 && (
+                      <optgroup label={t('ns_group_rack')}>
+                        {rack.map((l) => (
+                          <option key={l.location_id} value={l.location_id}>{l.location_id}</option>
                         ))}
                       </optgroup>
                     )}
