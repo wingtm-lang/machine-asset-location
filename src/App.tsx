@@ -16,6 +16,7 @@ import { DashboardView } from './views/DashboardView';
 import { MachinesListView } from './views/MachinesListView';
 import { MoveView } from './views/MoveView';
 import { NonSewingView } from './views/NonSewingView';
+import { FactoryMapView } from './views/FactoryMapView';
 import { TransfersView } from './views/TransfersView';
 import { OpnameView } from './views/OpnameView';
 import { HistoryView } from './views/HistoryView';
@@ -296,6 +297,8 @@ const MainAppInner: React.FC = () => {
             onTransferBatch={handleTransferBatch}
           />
         )}
+
+        {activeTab === 'factorymap' && <FactoryMapView />}
 
         {activeTab === 'nonsewing' && <NonSewingView key={`${nsSite}|${nsFocus}`} initialSite={nsSite} focusCode={nsFocus} />}
 

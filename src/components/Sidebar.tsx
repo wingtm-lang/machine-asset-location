@@ -70,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard, show: true },
     { id: 'machines', label: t('shell_hdr_machines'), icon: Boxes, show: true },
     { id: 'nonsewing', label: t('ns_title'), icon: Wrench, show: true },
+    { id: 'factorymap', label: t('fm_title'), icon: Building2, show: true },
     { id: 'rackmap', label: t('shell_hdr_rackmap'), icon: Grid, show: canUseRackMap },
     {
       id: 'move',

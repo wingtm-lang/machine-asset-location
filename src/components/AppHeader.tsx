@@ -21,7 +21,6 @@ import {
   ShieldAlert,
   Loader2,
   Wrench,
-  Gauge,
 } from 'lucide-react';
 
 interface AppHeaderProps {
@@ -39,6 +38,7 @@ const TAB_TITLES: Record<string, { title: string; subtitle: string; icon: any }>
   dashboard: { title: 'shell_hdr_dashboard', subtitle: 'shell_hdr_dashboard_sub', icon: LayoutDashboard },
   machines: { title: 'shell_hdr_machines', subtitle: 'shell_hdr_machines_sub', icon: Boxes },
   nonsewing: { title: 'ns_title', subtitle: 'nav_nonsewing_sub', icon: Wrench },
+  factorymap: { title: 'fm_title', subtitle: 'fm_nav_sub', icon: Building2 },
   rackmap: { title: 'shell_hdr_rackmap', subtitle: 'shell_hdr_rackmap_sub', icon: Grid },
   move: { title: 'shell_hdr_move', subtitle: 'shell_hdr_move_sub', icon: Layers },
   transfers: { title: 'transfers', subtitle: 'shell_hdr_transfers_sub', icon: ArrowRightLeft },
@@ -179,20 +179,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   <KeyRound className="w-3.5 h-3.5 text-[#ffd23f]" />
                   <span>{t('change_password')}</span>
                 </button>
-
-                {onOpenBenchmark && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserDropdownOpen(false);
-                      onOpenBenchmark();
-                    }}
-                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-[#cfe6ff] hover:text-white hover:bg-white/10 cursor-pointer text-left transition-colors"
-                  >
-                    <Gauge className="w-3.5 h-3.5 text-[#ffd23f]" />
-                    <span>Benchmark Speed</span>
-                  </button>
-                )}
 
                 <button
                   type="button"

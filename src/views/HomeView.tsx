@@ -28,6 +28,7 @@ interface HomeViewProps {
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateTab,
   onOpenScanner,
+  onOpenBenchmark,
 }) => {
   const { currentUser, canUseRackMap, canAddUser, canPerformAction, language } = useAuth();
   const t = makeT(language);
@@ -57,6 +58,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
       icon: Wrench,
       allowed: true,
       badge: t('home_mod_nonsewing_badge'),
+    },
+    {
+      id: 'factorymap',
+      title: t('home_mod_fm_title'),
+      desc: t('home_mod_fm_desc'),
+      icon: Building2,
+      allowed: true,
+      badge: t('home_mod_fm_badge'),
     },
     {
       id: 'rackmap',
