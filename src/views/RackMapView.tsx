@@ -9,6 +9,8 @@ import { getGasBaseUrl } from '../services/gasAuthService';
 import { RoomMap } from '../components/rackmap/RoomMap';
 import { RackDetail, SelectedColumnCoord } from '../components/rackmap/RackDetail';
 import { SlotPanel } from '../components/rackmap/SlotPanel';
+import { LevelCPanel } from '../components/rackmap/LevelCPanel';
+import { loadLevelC, CSlot } from '../components/rackmap/levelC';
 import { useAuth } from '../services/authContext';
 import { makeT, localeOf, localizeMessage } from '../services/translations';
 import {
@@ -41,6 +43,7 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
     column: 12,
   }); // Default selected column R4-B12
   const [slots, setSlots] = useState<RackSlotItem[]>([]);
+  const [levelC, setLevelC] = useState<Map<number, CSlot[]>>(new Map());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
@@ -82,9 +85,26 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
     fetchMapData();
   }, [fetchMapData]);
 
+  const fetchLevelC = useCallback(async () => {
+    try {
+      setLevelC(await loadLevelC(selectedRack.id));
+    } catch (err: any) {
+      showToast('error', err?.message ? localizeMessage(err.message, language) : t('rm_load_fail'));
+    }
+  }, [selectedRack.id, showToast, language]);
+
+  useEffect(() => {
+    fetchLevelC();
+  }, [fetchLevelC]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([fetchMapData(), fetchLevelC()]);
+  }, [fetchMapData, fetchLevelC]);
+
   // Total capacity across all 6 racks: 144 columns x 3 levels x 3 slots = 1296 slots
-  const totalCapacity = WH2_RACKS.reduce((acc, r) => acc + r.n * 3 * 3, 0);
-  const totalFilled = slots.length;
+  // Level C dikeluarkan dari hitungan kapasitas
+  const totalCapacity = WH2_RACKS.reduce((acc, r) => acc + r.n * 3 * 2, 0);
+  const totalFilled = slots.filter((s) => s.tingkat !== 'C').length;
   const occupancyPercent = totalCapacity > 0 ? (totalFilled / totalCapacity) * 100 : 0;
 
   return (
@@ -174,6 +194,7 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
               selectedCoord={selectedCoord}
               onSelectColumn={(coord) => setSelectedCoord(coord)}
               slots={slots}
+              levelC={levelC}
             />
           )}
         </div>
@@ -181,16 +202,27 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
         {/* Kolom Kanan: Desktop Drawer Sidebar Tetap */}
         <div className="hidden lg:block lg:col-span-4 sticky top-4">
           {selectedRack && selectedCoord ? (
-            <SlotPanel
-              rack={selectedRack}
-              coord={selectedCoord}
-              slots={slots}
-              byUser={currentUser?.displayName || currentUser?.username || 'User'}
-              onRefresh={fetchMapData}
-              onClose={() => setSelectedCoord(null)}
-              onNotifyToast={showToast}
-              onOpenScanner={onOpenScanner}
-            />
+            selectedCoord.level === 'C' ? (
+              <LevelCPanel
+                rack={selectedRack}
+                coord={selectedCoord}
+                slots={levelC.get(selectedCoord.column) ?? []}
+                onChanged={refreshAll}
+                onClose={() => setSelectedCoord(null)}
+                onNotify={showToast}
+              />
+            ) : (
+              <SlotPanel
+                rack={selectedRack}
+                coord={selectedCoord}
+                slots={slots}
+                byUser={currentUser?.displayName || currentUser?.username || 'User'}
+                onRefresh={refreshAll}
+                onClose={() => setSelectedCoord(null)}
+                onNotifyToast={showToast}
+                onOpenScanner={onOpenScanner}
+              />
+            )
           ) : (
             <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 text-center flex flex-col items-center justify-center min-h-[280px] text-slate-400 dark:text-slate-500 space-y-2.5 shadow-xs">
               <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-indigo-500/70">
@@ -211,16 +243,27 @@ export const RackMapView: React.FC<RackMapViewProps> = ({ onOpenScanner }) => {
           <div className="bg-white dark:bg-slate-900 rounded-t-2xl max-h-[72vh] overflow-y-auto shadow-2xl border-t border-slate-200 dark:border-slate-800 p-4 animate-in slide-in-from-bottom duration-200">
             {/* Handle Bar */}
             <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700 mx-auto mb-3" />
+            {selectedCoord.level === 'C' ? (
+              <LevelCPanel
+                rack={selectedRack}
+                coord={selectedCoord}
+                slots={levelC.get(selectedCoord.column) ?? []}
+                onChanged={refreshAll}
+                onClose={() => setSelectedCoord(null)}
+                onNotify={showToast}
+              />
+            ) : (
             <SlotPanel
               rack={selectedRack}
               coord={selectedCoord}
               slots={slots}
               byUser={currentUser?.displayName || currentUser?.username || 'User'}
-              onRefresh={fetchMapData}
+              onRefresh={refreshAll}
               onClose={() => setSelectedCoord(null)}
               onNotifyToast={showToast}
               onOpenScanner={onOpenScanner}
             />
+            )}
           </div>
         </div>
       )}

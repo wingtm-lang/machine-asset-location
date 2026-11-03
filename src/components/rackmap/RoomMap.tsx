@@ -19,7 +19,7 @@ export const RoomMap: React.FC<RoomMapProps> = ({
 
   // Hitung jumlah slot terisi per rak
   const getRackFilledCount = (rackId: string): number => {
-    return slots.filter((s) => s.rak === rackId).length;
+    return slots.filter((s) => s.rak === rackId && s.tingkat !== 'C').length;
   };
 
   return (
@@ -51,7 +51,7 @@ export const RoomMap: React.FC<RoomMapProps> = ({
           {WH2_RACKS.map((rack) => {
             const isSelected = selectedRack?.id === rack.id;
             const filledCount = getRackFilledCount(rack.id);
-            const totalCapacity = rack.n * 3 * 3; // kolom x 3 tingkat x 3 slot
+            const totalCapacity = rack.n * 3 * 2; // kolom x tingkat A,B x 3 slot (level C dikeluarkan)
             const fillRatio = totalCapacity > 0 ? filledCount / totalCapacity : 0;
             const fillPercent = Math.min(100, Math.round(fillRatio * 100));
 

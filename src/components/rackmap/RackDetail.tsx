@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { RackConfig, RACK_LEVELS, RackSlotItem } from '../../services/rackMapService';
 import { useAuth } from '../../services/authContext';
 import { makeT } from '../../services/translations';
+import { CSlot, columnState, LEVEL_C_COLORS } from './levelC';
 
 export interface SelectedColumnCoord {
   level: 'A' | 'B' | 'C' | string;
@@ -13,6 +14,7 @@ interface RackDetailProps {
   selectedCoord: SelectedColumnCoord | null;
   onSelectColumn: (coord: SelectedColumnCoord) => void;
   slots: RackSlotItem[];
+  levelC?: Map<number, CSlot[]>;
 }
 
 export const RackDetail: React.FC<RackDetailProps> = ({
@@ -20,6 +22,7 @@ export const RackDetail: React.FC<RackDetailProps> = ({
   selectedCoord,
   onSelectColumn,
   slots,
+  levelC,
 }) => {
   const { language } = useAuth();
   const t = makeT(language);
@@ -57,8 +60,9 @@ export const RackDetail: React.FC<RackDetailProps> = ({
 
   // Filter slots untuk rak saat ini
   const rackSlots = slots.filter((s) => s.rak === rack.id);
-  const totalCapacity = rack.n * 3 * 3;
-  const filledCount = rackSlots.length;
+  // Level C tidak dihitung dalam kapasitas (slot dinamis, isi tak terbatas)
+  const totalCapacity = rack.n * 3 * 2;
+  const filledCount = rackSlots.filter((s) => s.tingkat !== 'C').length;
 
   // Map koordinat slot: `${tingkat}-${kolom}` -> [slot1, slot2, slot3]
   const cellMap = new Map<string, (RackSlotItem | null)[]>();
@@ -127,19 +131,25 @@ export const RackDetail: React.FC<RackDetailProps> = ({
             )
             .filter(Boolean);
 
-          const tooltipLines = [
-            t('rm_cell_tip', { pos: `${rack.id}-${level}${col}`, n: filledSlotCount }),
-            ...assignedAssets,
-          ];
-          const tooltipText = tooltipLines.join('\n');
-
-          // Blok warna jika < 16px (Point 3: kosong = abu pudar, sebagian = aksen lembut, penuh = aksen penuh)
-          const tinyBg =
-            filledSlotCount === 0
+          const isC = level === 'C';
+          const cState = isC ? columnState(levelC?.get(col)) : 'EMPTY';
+          const cBg = LEVEL_C_COLORS[cState];
+          const cCount = isC ? (levelC?.get(col) ?? []).length : 0;
+          const tinyBg = isC
+            ? cBg
+            : filledSlotCount === 0
               ? 'bg-slate-200 dark:bg-slate-700/60'
               : filledSlotCount === 3
               ? 'bg-indigo-600 dark:bg-indigo-500'
               : 'bg-indigo-300 dark:bg-indigo-800/80';
+
+          const tooltipLines = isC
+            ? [t('lc_cell_tip', { pos: `${rack.id}-C${col}`, n: cCount }), t(`lc_state_${cState}`)]
+            : [
+                t('rm_cell_tip', { pos: `${rack.id}-${level}${col}`, n: filledSlotCount }),
+                ...assignedAssets,
+              ];
+          const tooltipText = tooltipLines.join('\n');
 
           return (
             <button
@@ -164,7 +174,12 @@ export const RackDetail: React.FC<RackDetailProps> = ({
               aria-label={t('rm_cell_aria', { rack: rack.id, level, col })}
             >
               {/* Garis 3 slot jika kotak >= 16px (Point 3) */}
-              {!isTinyCell && (
+              {!isTinyCell && isC && (
+                <div className="w-full h-full p-[3px]">
+                  <span className={`block w-full h-full rounded-sm ${cBg}`} />
+                </div>
+              )}
+              {!isTinyCell && !isC && (
                 <div className="w-full h-full p-[2px] flex flex-col justify-between">
                   {[0, 1, 2].map((slotIdx) => {
                     const isFilled = Boolean(slotItems[slotIdx]);
@@ -255,7 +270,7 @@ export const RackDetail: React.FC<RackDetailProps> = ({
       {/* Grid 3 Tingkatan: C (atas), B (tengah), A (bawah) - TANPA SCROLLBAR HORIZONTAL */}
       <div className="w-full space-y-3">
         {RACK_LEVELS.map((level) => (
-          <div key={level} className="flex items-center gap-2 w-full">
+          <div key={level} className="flex items-center gap-2 w-full" title={level === 'C' ? t('lc_level_note') : undefined}>
             {/* Label Huruf Tingkat dalam Lingkaran Kecil di Kiri */}
             <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 select-none">
               {level}
@@ -295,6 +310,14 @@ export const RackDetail: React.FC<RackDetailProps> = ({
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-xs border-2 border-indigo-500 bg-slate-100 dark:bg-slate-800" />
           {t('rm_legend_sel')}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 dark:bg-amber-400" />
+          {t('lc_legend_note')}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-xs bg-emerald-600 dark:bg-emerald-400" />
+          {t('lc_legend_both')}
         </span>
       </div>
     </div>
