@@ -37,11 +37,21 @@ export const LevelCPanel: React.FC<Props> = ({ rack, coord, slots, onChanged, on
     return true;
   };
 
-  const run = async (job: () => Promise<boolean>) => {
+  // Slot kosong pertama = satu-satunya slot yang menampilkan kolom tambah
+  const firstEmpty = slots.find((x) => x.machines.length === 0 && x.notes.length === 0);
+  const emptyCount = slots.filter((x) => x.machines.length === 0 && x.notes.length === 0).length;
+
+  const run = async (job: () => Promise<boolean>, fillsEmpty = false) => {
     if (busy) return;
     setBusy(true);
     try {
-      if (await job()) await onChanged();
+      if (await job()) {
+        // Slot kosong terakhir baru terisi -> buat slot berikutnya otomatis
+        if (fillsEmpty && emptyCount <= 1) {
+          await rpc('add_rack_slot', { p_rack: rack.id, p_column: coord.column });
+        }
+        await onChanged();
+      }
     } finally {
       setBusy(false);
     }
@@ -56,7 +66,7 @@ export const LevelCPanel: React.FC<Props> = ({ rack, coord, slots, onChanged, on
       const ok = await rpc('add_rack_note', { p_location_id: loc, p_note: text });
       if (ok) setTexts((p) => ({ ...p, [loc]: '' }));
       return ok;
-    });
+    }, true);
   const delNote = (id: number) => run(() => rpc('delete_rack_note', { p_id: id }));
 
   const addMachine = (loc: string) =>
@@ -81,7 +91,7 @@ export const LevelCPanel: React.FC<Props> = ({ rack, coord, slots, onChanged, on
       const ok = await rpc('move_machine', { p_asset_code: row.asset_code, p_location_id: loc, p_request_id: crypto.randomUUID() });
       if (ok) setCodes((p) => ({ ...p, [loc]: '' }));
       return ok;
-    });
+    }, true);
 
   const removeMachine = (assetCode: string, category: string) =>
     run(() =>
@@ -186,6 +196,7 @@ export const LevelCPanel: React.FC<Props> = ({ rack, coord, slots, onChanged, on
                 </div>
               ))}
 
+              {firstEmpty?.locationId === s.locationId && (<>
               <div className="flex items-center gap-2">
                 <input
                   value={codes[s.locationId] ?? ''}
@@ -211,11 +222,13 @@ export const LevelCPanel: React.FC<Props> = ({ rack, coord, slots, onChanged, on
                   {t('lc_add_note')}
                 </button>
               </div>
+              </>)}
             </div>
           );
         })}
       </div>
 
+      {!firstEmpty && (
       <button
         type="button"
         disabled={busy}
@@ -225,6 +238,7 @@ export const LevelCPanel: React.FC<Props> = ({ rack, coord, slots, onChanged, on
         {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
         {t('lc_add_slot')}
       </button>
+      )}
     </div>
   );
 };

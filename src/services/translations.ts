@@ -1268,7 +1268,7 @@ export const defaultTranslations: Translations = {
   md_origin_purchase: { id: 'Origin Purchase (Pembelian Pertama)', en: 'Origin Purchase (First Purchased At)' },
   md_doc_no: { id: 'No. Doc', en: 'Doc No.' },
   lc_n_slots: { id: '{n} slot', en: '{n} slots' },
-  lc_hint: { id: 'Level C: slot bisa ditambah, tiap slot menampung mesin dan catatan tanpa batas.', en: 'Level C: slots can be added; each slot holds unlimited machines and notes.' },
+  lc_hint: { id: 'Level C: isi ditambahkan di slot kosong berikutnya; slot baru muncul otomatis setelah terisi.', en: 'Level C: add contents to the next empty slot; a new slot appears automatically once filled.' },
   lc_counts: { id: '{m} mesin · {n} catatan', en: '{m} machines · {n} notes' },
   lc_remove_slot: { id: 'Hapus slot kosong', en: 'Delete empty slot' },
   lc_del_note: { id: 'Hapus catatan', en: 'Delete note' },
