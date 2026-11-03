@@ -82,6 +82,7 @@ export const defaultTranslations: Translations = {
   loc_UNASSIGNED: { id: 'Belum Ditentukan Line / Slot', en: 'Unassigned Line / Slot' },
   loc_RACK_SLOT: { id: 'Slot Rak (WH2)', en: 'Rack Slot (WH2)' },
   loc_MAIN: { id: 'Lokasi Utama', en: 'Main Site Area' },
+  loc_NS_AREA: { id: 'Area Penempatan', en: 'Placement Area' },
 
   // Move & Status View
   move_single: { id: 'Pindah 1 Mesin', en: 'Move 1 Machine' },

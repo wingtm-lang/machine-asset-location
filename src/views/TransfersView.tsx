@@ -450,7 +450,8 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
         .filter((l) => l.active && String(l.type) !== 'NS_AREA' && String(l.type) !== 'RACK_SLOT');
       return [...nsAreas.filter((l) => l.siteId === site), ...lines];
     }
-    return storageService.getLocations(site).filter((l) => l.active && String(l.type) !== 'NS_AREA');
+    // Mesin sewing boleh ditempatkan di line sewing maupun di area non sewing.
+    return storageService.getLocations(site).filter((l) => l.active);
   }, [receivingTransfer, nsCodes, nsAreas]);
 
   // Validate a single machine query (Barcode / Asset Code / Serial)

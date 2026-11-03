@@ -270,7 +270,6 @@ class StorageService {
           supabase
             .from('locations')
             .select('location_id, site_id, type, display_name, rack_no, column_no, stack, slot_no, active, sort_order')
-            .neq('type', 'NS_AREA')
             .order('sort_order')
             .order('location_id')
             .range(a, b)
